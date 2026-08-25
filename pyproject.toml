@@ -37,5 +37,9 @@ testpaths = ["tests"]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["app", "worker", "pipeline", "extract", "common"]
+[tool.setuptools.packages.find]
+# Auto-discover rather than list literally: api.Dockerfile and
+# worker.Dockerfile each COPY a different subset of these directories into
+# the build context (api skips worker/pipeline entirely to stay light), so
+# a hardcoded list fails whichever image doesn't have every directory.
+include = ["app*", "worker*", "pipeline*", "extract*", "common*"]
