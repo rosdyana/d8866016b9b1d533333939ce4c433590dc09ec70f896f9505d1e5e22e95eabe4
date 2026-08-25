@@ -16,7 +16,12 @@ services:
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      # Bound to loopback only: on a host running Caddy (or another reverse
+      # proxy) in front of several services, publishing to all interfaces
+      # would let the API be reached directly, bypassing Caddy/TLS. Point
+      # Caddy's reverse_proxy at 127.0.0.1:${APP_PORT}. Change APP_PORT in
+      # .env if 8000 is already taken by another service on this host.
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
     env_file: .env
     depends_on:
       redis:
