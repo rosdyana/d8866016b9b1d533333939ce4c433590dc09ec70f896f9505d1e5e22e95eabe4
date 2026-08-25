@@ -46,7 +46,9 @@ def _build_stages(ctx: dict, settings) -> list:
     ]
 
 
-async def run_scrape_job(ctx: dict, job_id: str, url: str, formats: list[str]) -> None:
+async def run_scrape_job(
+    ctx: dict, job_id: str, url: str, formats: list[str], robotstxt: bool = True
+) -> None:
     settings = ctx["settings"]
     store = JobStore(ctx["redis"], settings.job_result_ttl_seconds)
     host = urlparse(url).netloc
@@ -55,6 +57,11 @@ async def run_scrape_job(ctx: dict, job_id: str, url: str, formats: list[str]) -
     try:
         await store.update(job_id, status="running")
         logger.info("job_started")
+        if not robotstxt:
+            # Explicit per-request opt-out by an authenticated caller - log
+            # it distinctly, since it's a deliberate deviation from the
+            # default "respect robots.txt" behavior worth being able to audit.
+            logger.warning("robots_txt_bypassed")
 
         stages = _build_stages(ctx, settings)
         domain_memory = ctx["domain_memory"] if settings.domain_memory_enabled else None
@@ -62,7 +69,13 @@ async def run_scrape_job(ctx: dict, job_id: str, url: str, formats: list[str]) -
         try:
             async with ctx["rate_limiter"].slot(host):
                 result = await asyncio.wait_for(
-                    run_pipeline(url, ctx["robots_gate"], stages, domain_memory=domain_memory),
+                    run_pipeline(
+                        url,
+                        ctx["robots_gate"],
+                        stages,
+                        domain_memory=domain_memory,
+                        respect_robots=robotstxt,
+                    ),
                     timeout=settings.job_timeout_seconds,
                 )
         except RobotsDisallowed as exc:

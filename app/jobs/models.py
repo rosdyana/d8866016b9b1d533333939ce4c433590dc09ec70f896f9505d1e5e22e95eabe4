@@ -31,6 +31,7 @@ class Job(BaseModel):
     id: str
     url: str
     formats: list[OutputFormat] = Field(default_factory=lambda: list(ALL_FORMATS))
+    robotstxt: bool = True
     status: JobStatus = "queued"
     stage_won: str | None = None
     result: ExtractionOutput | None = None

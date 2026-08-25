@@ -64,12 +64,14 @@ Content-Type: application/json
 ```json
 {
   "url": "https://example.com/",
-  "formats": ["raw_html", "markdown", "llm_text"]
+  "formats": ["raw_html", "markdown", "llm_text"],
+  "robotstxt": true
 }
 ```
 
 - `url` — required.
 - `formats` — optional, defaults to all three (`raw_html`, `markdown`, `llm_text`) if omitted. Any subset is valid, e.g. `["markdown"]`.
+- `robotstxt` — optional, defaults to `true`. Set to `false` to skip the robots.txt permission check entirely for this request (an explicit per-call opt-out for trusted/authenticated callers — use deliberately, not as a default).
 
 **Response `202 Accepted`**
 ```json
@@ -77,6 +79,7 @@ Content-Type: application/json
   "id": "74f499106ffa413197d238a9057c3ce6",
   "url": "https://example.com/",
   "formats": ["raw_html", "markdown", "llm_text"],
+  "robotstxt": true,
   "status": "queued",
   "stage_won": null,
   "result": null,

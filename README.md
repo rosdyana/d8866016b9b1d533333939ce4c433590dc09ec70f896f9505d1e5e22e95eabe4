@@ -62,6 +62,8 @@ POST /jobs
 {"url": "https://example.com/", "formats": ["raw_html", "markdown", "llm_text"]}
 ```
 
+`formats` defaults to all three if omitted. Add `"robotstxt": false` to skip the robots.txt permission check for that request — off by default; robots.txt is respected unless a caller explicitly opts out.
+
 Returns `202 Accepted` with a job object (`id`, `status: "queued"`).
 
 **Poll for the result**

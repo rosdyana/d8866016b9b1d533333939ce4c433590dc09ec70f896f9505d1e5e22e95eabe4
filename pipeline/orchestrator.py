@@ -1,7 +1,10 @@
 """Walks the fetch stages in order, stopping at the first one whose result
 passes the quality check. Stage escalation only happens on failure — each
 stage is strictly more expensive than the last, so cheaper stages are always
-tried first (Stage 0's robots.txt gate applies to all of them equally).
+tried first (Stage 0's robots.txt gate, when enabled, applies to all of them
+equally). `respect_robots=False` is an explicit per-request opt-out for a
+trusted, authenticated caller - it skips the gate entirely rather than
+fetching robots.txt and ignoring the result.
 """
 
 from __future__ import annotations
@@ -42,10 +45,12 @@ async def run_pipeline(
     robots_gate: RobotsGate,
     stages: list[Stage],
     domain_memory: DomainMemory | None = None,
+    respect_robots: bool = True,
 ) -> PipelineResult:
-    decision = await robots_gate.check(url)
-    if not decision.allowed:
-        raise RobotsDisallowed(f"robots.txt disallows fetching {url}")
+    if respect_robots:
+        decision = await robots_gate.check(url)
+        if not decision.allowed:
+            raise RobotsDisallowed(f"robots.txt disallows fetching {url}")
 
     host = urlparse(url).netloc
     last_successful = await domain_memory.get_last_successful_stage(host) if domain_memory else None

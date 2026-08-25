@@ -19,13 +19,18 @@ async def create_job(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> Job:
-    job = Job(id=uuid.uuid4().hex, url=str(payload.url), formats=payload.formats)
+    job = Job(
+        id=uuid.uuid4().hex,
+        url=str(payload.url),
+        formats=payload.formats,
+        robotstxt=payload.robotstxt,
+    )
 
     store = JobStore(request.app.state.redis, settings.job_result_ttl_seconds)
     await store.create(job)
 
     await request.app.state.arq_pool.enqueue_job(
-        "run_scrape_job", job.id, job.url, job.formats
+        "run_scrape_job", job.id, job.url, job.formats, job.robotstxt
     )
     return job
 
