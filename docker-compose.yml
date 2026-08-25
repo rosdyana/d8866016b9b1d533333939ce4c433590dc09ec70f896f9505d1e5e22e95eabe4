@@ -1,0 +1,58 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    mem_limit: 2g
+
+  crawl4ai:
+    # Pin explicitly, never :latest - extract/normalize.py's response
+    # parsing and pipeline/stages/stage4_crawl4ai.py's request shape are
+    # both validated against this exact version's documented/source
+    # behavior; re-check both on any bump.
+    image: unclecode/crawl4ai:0.9.2
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Required, not just hardening: crawl4ai's server binds to loopback
+      # only (unreachable from other containers) unless this is set, so
+      # without it the worker can never reach this service at all.
+      CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN}
+    mem_limit: 4g
+    shm_size: "1g"
+
+volumes:
+  redis-data:
