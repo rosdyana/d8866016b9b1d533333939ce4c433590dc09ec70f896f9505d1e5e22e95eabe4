@@ -30,10 +30,26 @@ _CHALLENGE_MARKERS = (
 _TAG_RE = re.compile(r"<[^>]+>")
 _WHITESPACE_RE = re.compile(r"\s+")
 
-# Below this ratio of visible text to raw HTML, a page is almost certainly
-# a JS-rendered shell (empty <div id="root">/<div id="app"> and little else).
-_MIN_TEXT_TO_HTML_RATIO = 0.02
+# There used to be a visible-text-to-HTML ratio check here as a second
+# JS-shell signal. It was removed after measuring it against both real
+# pages and real shells: it tracks how much JavaScript a page ships, not
+# whether the page has content. An OEM product catalogue (a 1.2MB Lenovo
+# listing whose products live in a 638KB inline script) scored 0.0030
+# while quotes.toscrape.com/js/ - an actual empty shell - scored 0.0165,
+# so the check fired *harder* on the real page than on the shell it was
+# meant to catch. Counting text after clean_html() strips <script> is
+# what actually catches those shells, via _MIN_TEXT_LENGTH below.
 _MIN_TEXT_LENGTH = 200
+
+# A megabyte of HTML that renders under this much text is a shell whose
+# content hasn't been built yet - a page that is genuinely this short is
+# also a *small* page. Measured across 16 real pages: every rendered page
+# cleared 1,700 characters, while lenovo.com's Taiwan product pages ship
+# 788KB of HTML around 413 characters of text and their specs only appear
+# once a browser runs the page. Without this, Stage 1 "wins" with the shell
+# and the browser stages that could render it never run.
+_UNRENDERED_MAX_TEXT_LENGTH = 1000
+_UNRENDERED_MIN_HTML_LENGTH = 200_000
 
 # Real bot-challenge/interstitial pages are short. A long article that
 # happens to mention "captcha" or "enable javascript" in passing (e.g. an
@@ -48,15 +64,18 @@ class QualityVerdict:
     reason: str
 
 
-def _visible_text_len(html: str) -> int:
+def _visible_text(html: str) -> str:
     # Script/style/JSON blobs (e.g. a SPA's embedded data payload) are not
     # visible text - counting them made JS-shell pages look content-rich
     # enough to wrongly pass, when a real user (and trafilatura) would see
     # nothing there at all.
     without_script_style = clean_html(html)
     text = _TAG_RE.sub(" ", without_script_style)
-    text = _WHITESPACE_RE.sub(" ", text).strip()
-    return len(text)
+    return _WHITESPACE_RE.sub(" ", text).strip()
+
+
+def _visible_text_len(html: str) -> int:
+    return len(_visible_text(html))
 
 
 def is_good_enough(status_code: int, html: str) -> QualityVerdict:
@@ -65,18 +84,24 @@ def is_good_enough(status_code: int, html: str) -> QualityVerdict:
     if status_code >= 400:
         return QualityVerdict(False, f"error_status_{status_code}")
 
-    text_len = _visible_text_len(html)
-    if text_len < _MIN_TEXT_LENGTH:
+    text = _visible_text(html)
+    if len(text) < _MIN_TEXT_LENGTH:
         return QualityVerdict(False, "text_too_short")
 
-    if text_len < _MARKER_CHECK_MAX_TEXT_LEN:
-        lowered = html.lower()
+    if len(text) < _UNRENDERED_MAX_TEXT_LENGTH and len(html) > _UNRENDERED_MIN_HTML_LENGTH:
+        return QualityVerdict(False, "unrendered_shell")
+
+    if len(text) < _MARKER_CHECK_MAX_TEXT_LEN:
+        # Match markers against visible text, never raw HTML. A real
+        # challenge page says "checking your browser" where a user can read
+        # it; script source says things like
+        # `RECAPTCHA:"https://www.recaptcha.net/..."` as a config path.
+        # lenovo.com product pages carry exactly that string and were being
+        # rejected as challenges after a perfectly good 200 fetch, costing
+        # a full browser launch per product page.
+        lowered = text.lower()
         for marker in _CHALLENGE_MARKERS:
             if marker in lowered:
                 return QualityVerdict(False, f"challenge_marker:{marker}")
-
-    html_len = max(len(html), 1)
-    if text_len / html_len < _MIN_TEXT_TO_HTML_RATIO:
-        return QualityVerdict(False, "low_text_to_html_ratio")
 
     return QualityVerdict(True, "ok")

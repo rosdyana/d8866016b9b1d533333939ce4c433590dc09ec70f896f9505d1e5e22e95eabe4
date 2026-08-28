@@ -1,51 +1,79 @@
-import httpx
+"""Stage 1's non-HTML guard.
+
+curl_cffi drives libcurl directly, so respx (which patches httpx's
+transport) cannot intercept it - these run against a real loopback HTTP
+server instead of a mocked transport.
+"""
+
+from __future__ import annotations
+
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 import pytest
-import respx
+from curl_cffi import AsyncSession
 
 from common.errors import UnsupportedContentType
-from pipeline.stages.stage1_http import Stage1Http
+from pipeline.stages.stage1_curl_cffi import Stage1CurlCffi
+
+BODY = b"<html><body><p>hello</p></body></html>"
+
+
+def _make_server(content_type: str | None):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's API
+            self.send_response(200)
+            if content_type is not None:
+                self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(BODY)))
+            self.end_headers()
+            self.wfile.write(BODY)
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_port}/"
+
+
+@pytest.fixture
+def serve():
+    servers = []
+
+    def _serve(content_type: str | None):
+        server, url = _make_server(content_type)
+        servers.append(server)
+        return url
+
+    yield _serve
+    for server in servers:
+        server.shutdown()
 
 
 @pytest.mark.asyncio
-async def test_raises_on_pdf_content_type():
-    async with httpx.AsyncClient() as client:
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get("http://example.com/file.pdf").mock(
-                return_value=httpx.Response(
-                    200, content=b"%PDF-1.4", headers={"content-type": "application/pdf"}
-                )
-            )
-            stage = Stage1Http(client, user_agent="ccscraper-test")
-            with pytest.raises(UnsupportedContentType):
-                await stage.fetch("http://example.com/file.pdf")
+async def test_rejects_non_html_content_type(serve):
+    url = serve("application/pdf")
+    async with AsyncSession() as session:
+        stage = Stage1CurlCffi(session)
+        with pytest.raises(UnsupportedContentType):
+            await stage.fetch(url)
 
 
 @pytest.mark.asyncio
-async def test_allows_html_with_charset_suffix():
-    async with httpx.AsyncClient() as client:
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get("http://example.com/page").mock(
-                return_value=httpx.Response(
-                    200,
-                    text="<html><body>hi</body></html>",
-                    headers={"content-type": "text/html; charset=utf-8"},
-                )
-            )
-            stage = Stage1Http(client, user_agent="ccscraper-test")
-            result = await stage.fetch("http://example.com/page")
-            assert "<html>" in result.html
+async def test_allows_html_with_charset(serve):
+    url = serve("text/html; charset=utf-8")
+    async with AsyncSession() as session:
+        result = await Stage1CurlCffi(session).fetch(url)
+    assert result.status_code == 200
+    assert "hello" in result.html
 
 
 @pytest.mark.asyncio
-async def test_allows_missing_content_type_header():
-    # httpx.Response(text=...) auto-adds a text/plain content-type unless
-    # given raw bytes via content=, which is what actually simulates a
-    # response with no Content-Type header at all.
-    async with httpx.AsyncClient() as client:
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get("http://example.com/page").mock(
-                return_value=httpx.Response(200, content=b"<html><body>hi</body></html>")
-            )
-            stage = Stage1Http(client, user_agent="ccscraper-test")
-            result = await stage.fetch("http://example.com/page")
-            assert "<html>" in result.html
+async def test_allows_missing_content_type_header(serve):
+    # A response with no Content-Type at all must not be treated as
+    # unsupported - only an explicitly non-HTML type is terminal.
+    url = serve(None)
+    async with AsyncSession() as session:
+        result = await Stage1CurlCffi(session).fetch(url)
+    assert result.status_code == 200

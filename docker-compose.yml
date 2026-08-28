@@ -41,23 +41,13 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    mem_limit: 2g
-
-  crawl4ai:
-    # Pin explicitly, never :latest - extract/normalize.py's response
-    # parsing and pipeline/stages/stage4_crawl4ai.py's request shape are
-    # both validated against this exact version's documented/source
-    # behavior; re-check both on any bump.
-    image: unclecode/crawl4ai:0.9.2
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      # Required, not just hardening: crawl4ai's server binds to loopback
-      # only (unreachable from other containers) unless this is set, so
-      # without it the worker can never reach this service at all.
-      CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN}
+    # Two browser families (Firefox via Camoufox, Chromium via
+    # SeleniumBase) plus a virtual display, launched per job rather than
+    # pooled - 2g is not enough headroom.
     mem_limit: 4g
-    shm_size: "1g"
+    # Chromium crashes on the default 64MB /dev/shm.
+    shm_size: "2g"
+
 
 volumes:
   redis-data:

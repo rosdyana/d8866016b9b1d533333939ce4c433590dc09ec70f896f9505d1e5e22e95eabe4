@@ -8,40 +8,31 @@ import structlog
 from app.jobs.store import JobStore
 from common.errors import AllStagesFailed, RobotsDisallowed, UnsupportedContentType
 from common.logging import get_logger
-from extract.normalize import build_from_crawl4ai, build_from_html
+from extract.normalize import build_from_html
 from pipeline.orchestrator import run_pipeline
-from pipeline.stages.stage1_http import Stage1Http
-from pipeline.stages.stage2_playwright import Stage2Playwright
-from pipeline.stages.stage3_playwright_proxy import Stage3PlaywrightProxy
-from pipeline.stages.stage4_crawl4ai import Stage4Crawl4AI
+from pipeline.stages.stage1_curl_cffi import Stage1CurlCffi
+from pipeline.stages.stage2_camoufox import Stage2Camoufox
+from pipeline.stages.stage3_seleniumbase import Stage3SeleniumBase
 
 logger = get_logger(__name__)
 
 
 def _build_stages(ctx: dict, settings) -> list:
     return [
-        Stage1Http(
-            http_client=ctx["http_client"],
-            user_agent=settings.user_agent,
+        Stage1CurlCffi(
+            session=ctx["curl_session"],
+            impersonate=settings.curl_impersonate_target,
             timeout_seconds=settings.stage1_timeout_seconds,
         ),
-        Stage2Playwright(
-            context_pool=ctx["context_pool"],
-            user_agent=settings.user_agent,
+        Stage2Camoufox(
+            slots=ctx["browser_slots"],
             timeout_seconds=settings.stage2_timeout_seconds,
+            headless="virtual" if settings.browser_use_xvfb else True,
         ),
-        Stage3PlaywrightProxy(
-            context_pool=ctx["context_pool"],
-            proxy_provider=ctx["proxy_provider"],
-            user_agent=settings.user_agent,
-            enabled=settings.proxy_enabled,
-            timeout_seconds=settings.stage2_timeout_seconds,
-        ),
-        Stage4Crawl4AI(
-            http_client=ctx["http_client"],
-            base_url=settings.crawl4ai_base_url,
-            api_token=settings.crawl4ai_api_token,
-            timeout_seconds=settings.stage4_timeout_seconds,
+        Stage3SeleniumBase(
+            slots=ctx["browser_slots"],
+            timeout_seconds=settings.stage3_timeout_seconds,
+            use_xvfb=settings.browser_use_xvfb,
         ),
     ]
 
@@ -103,10 +94,7 @@ async def run_scrape_job(
             await store.update(job_id, status="error", error=str(exc))
             return
 
-        if result.stage_won == "stage4_crawl4ai" and result.extra is not None:
-            output = build_from_crawl4ai(result.extra, tuple(formats))
-        else:
-            output = build_from_html(result.html, result.final_url, tuple(formats))
+        output = build_from_html(result.html, result.final_url, tuple(formats))
 
         logger.info("job_succeeded", stage_won=result.stage_won)
         await store.update(job_id, status="success", stage_won=result.stage_won, result=output)

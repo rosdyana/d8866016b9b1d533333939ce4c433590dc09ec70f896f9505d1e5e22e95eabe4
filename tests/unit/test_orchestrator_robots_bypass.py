@@ -21,7 +21,7 @@ class DenyingRobotsGate:
 
 
 class SucceedingStage(Stage):
-    name = "stage1"
+    name = "stage1_curl_cffi"
     timeout_seconds = 5.0
 
     async def fetch(self, url: str) -> FetchResult:
@@ -44,7 +44,7 @@ async def test_bypasses_robots_when_respect_robots_is_false():
     result = await run_pipeline(
         "http://example.com/page", gate, [SucceedingStage()], respect_robots=False
     )
-    assert result.stage_won == "stage1"
+    assert result.stage_won == "stage1_curl_cffi"
     # The whole point of a bypass is skipping the check, not fetching
     # robots.txt and then discarding an unfavorable answer.
     assert gate.check_call_count == 0

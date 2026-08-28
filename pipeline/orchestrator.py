@@ -25,7 +25,6 @@ class PipelineResult:
     stage_won: str
     html: str
     final_url: str
-    extra: dict | None = None
 
 
 def _ordered_from_memory(stages: list[Stage], last_successful: str | None) -> list[Stage]:
@@ -63,7 +62,7 @@ async def run_pipeline(
                 stage.fetch(url), timeout=stage.timeout_seconds
             )
         except UnsupportedContentType:
-            # A browser or crawl4ai can't turn a PDF/image into HTML either -
+            # A browser can not turn a PDF/image into HTML either -
             # escalating further would just waste the rest of the chain.
             raise
         except TimeoutError:
@@ -83,7 +82,6 @@ async def run_pipeline(
                 stage_won=stage.name,
                 html=result.html,
                 final_url=result.final_url,
-                extra=result.extra,
             )
         failures.append(f"{stage.name}:{verdict.reason}")
 

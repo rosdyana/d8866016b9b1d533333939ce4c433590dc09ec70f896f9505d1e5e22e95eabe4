@@ -24,14 +24,14 @@ async def test_returns_none_when_nothing_recorded():
 @pytest.mark.asyncio
 async def test_records_and_recalls_successful_stage():
     memory = DomainMemory(FakeRedis(), ttl_seconds=3600)
-    await memory.record_success("example.com", "stage2_playwright")
-    assert await memory.get_last_successful_stage("example.com") == "stage2_playwright"
+    await memory.record_success("example.com", "stage2_camoufox")
+    assert await memory.get_last_successful_stage("example.com") == "stage2_camoufox"
 
 
 @pytest.mark.asyncio
 async def test_domains_are_independent():
     memory = DomainMemory(FakeRedis(), ttl_seconds=3600)
-    await memory.record_success("a.com", "stage1_http")
-    await memory.record_success("b.com", "stage4_crawl4ai")
-    assert await memory.get_last_successful_stage("a.com") == "stage1_http"
-    assert await memory.get_last_successful_stage("b.com") == "stage4_crawl4ai"
+    await memory.record_success("a.com", "stage1_curl_cffi")
+    await memory.record_success("b.com", "stage3_seleniumbase")
+    assert await memory.get_last_successful_stage("a.com") == "stage1_curl_cffi"
+    assert await memory.get_last_successful_stage("b.com") == "stage3_seleniumbase"

@@ -117,7 +117,7 @@ Authorization: Bearer {{auth_token}}
 |---|---|
 | `queued` | accepted, waiting for a worker |
 | `running` | a worker is actively processing it |
-| `success` | done — `result` holds the requested formats, `stage_won` names which stage produced them (`stage1_http`, `stage2_playwright`, `stage3_playwright_proxy`, `stage4_crawl4ai`) |
+| `success` | done — `result` holds the requested formats, `stage_won` names which stage produced them (`stage1_curl_cffi`, `stage2_camoufox`, `stage3_seleniumbase`) |
 | `blocked` | every stage failed its quality/anti-bot check |
 | `robots_disallowed` | robots.txt forbids fetching this URL |
 | `unsupported_content_type` | the URL resolved to non-HTML (PDF, image, etc.) |
@@ -131,7 +131,7 @@ Authorization: Bearer {{auth_token}}
   "url": "https://example.com/",
   "formats": ["raw_html", "markdown", "llm_text"],
   "status": "success",
-  "stage_won": "stage1_http",
+  "stage_won": "stage1_curl_cffi",
   "result": {
     "raw_html": "<html>...</html>",
     "markdown": "# Example Domain\n\n...",
