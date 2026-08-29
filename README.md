@@ -78,6 +78,54 @@ GET /jobs/{id}
 
 `status` is one of `queued`, `running`, `success`, `blocked`, `robots_disallowed`, `unsupported_content_type`, `timeout`, `error`. On `success`, `result` holds the requested output formats and `stage_won` names which stage produced them.
 
+## MCP
+
+The same service also speaks the Model Context Protocol, so an LLM app can fetch a page as a
+tool call instead of driving the job API by hand. The endpoint is **Streamable HTTP at `/mcp`**
+on the existing API container — same port, same reverse proxy, same `AUTH_TOKEN`:
+
+```json
+{
+  "mcpServers": {
+    "ccscraper": {
+      "url": "https://scraper.example.com/mcp",
+      "headers": { "Authorization": "Bearer <AUTH_TOKEN>" }
+    }
+  }
+}
+```
+
+Two tools:
+
+| Tool | Arguments | Returns |
+| --- | --- | --- |
+| `scrape` | `url`, `formats` (default `["llm_text"]`), `robotstxt` (default `true`), `wait_seconds` (default `45`, 5-300) | `status`, `stage_won`, and the requested format fields |
+| `get_scrape_result` | `job_id`, `wait_seconds` | the same shape |
+
+`formats` defaults to `llm_text` alone rather than all three: `raw_html` is routinely megabytes,
+and a tool result goes straight into a model's context.
+
+`scrape` submits the same job the REST API does and waits for it, reporting MCP progress
+notifications while it does. A page that resolves at Stage 1 comes back in well under a second;
+one that escalates to a browser can take tens of seconds, and if `wait_seconds` runs out the
+result comes back with `status` still `queued`/`running` and a `job_id` to hand to
+`get_scrape_result`. The default of 45s sits under the timeout most MCP clients apply to a tool
+call, so the common case returns content in one call.
+
+Terminal failures (`blocked`, `robots_disallowed`, `unsupported_content_type`, `timeout`,
+`error`) come back as data rather than as tool errors, because the model needs to tell them
+apart — "robots.txt forbids this" and "every stage was detected" call for different next moves.
+
+`MCP_ALLOWED_HOSTS` is the one setting the MCP endpoint adds. Left empty it turns off the SDK's
+DNS-rebinding check, which is correct behind a reverse proxy that already controls the `Host`
+header and is what the loopback-only port mapping above assumes. Set it (comma-separated,
+`scraper.example.com,scraper.example.com:*`) if the container is ever reachable directly.
+
+If you write your own MCP client and supply your own `httpx2.AsyncClient` to carry the
+`Authorization` header, set a long read timeout on it (`timeout=httpx2.Timeout(30.0,
+read=300.0)`) — the SDK only applies its own 300s read timeout to a client it created, and the
+default 5s will abort a browser-stage fetch mid-flight.
+
 ## Configuration
 
 See `env.example` for the full list of environment variables (timeouts, concurrency caps, TTLs, feature flags). All are read by `app/config.py`.
@@ -115,7 +163,7 @@ AUTH_TOKEN=dev-token REDIS_URL=redis://localhost:6379/0 .venv/Scripts/python -m 
 
 ## Project layout
 
-- `app/` — FastAPI web tier (job submission/status only; never imports a stage or a browser library)
+- `app/` — FastAPI web tier (job submission/status plus the `/mcp` endpoint; never imports a stage or a browser library)
 - `worker/` — arq worker that actually executes the fallback pipeline
 - `pipeline/` — the fetch stages, robots gate, browser concurrency slots, consent dismissal, domain memory
 - `extract/` — canonical HTML → raw_html/markdown/llm_text formatting plus ld+json product parsing, decoupled from which stage won

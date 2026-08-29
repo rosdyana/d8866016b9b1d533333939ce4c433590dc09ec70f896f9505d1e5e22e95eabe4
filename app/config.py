@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     stage3_timeout_seconds: float = 90.0
     job_timeout_seconds: float = 180.0
 
+    # Comma-separated Host allowlist for the mounted /mcp endpoint, e.g.
+    # "scraper.example.com,scraper.example.com:*". The MCP SDK arms
+    # DNS-rebinding protection with a localhost-only allowlist when this is
+    # unset, which answers 421 Misdirected Request to every request Caddy
+    # forwards under the public hostname - and only logs the reason
+    # server-side. Empty turns the check off, the honest setting behind a
+    # reverse proxy that already controls the Host header and the only one
+    # that works with the loopback-only port mapping out of the box.
+    mcp_allowed_hosts: str = ""
+
     robots_cache_ttl_seconds: int = 86400
     job_result_ttl_seconds: int = 259200
 

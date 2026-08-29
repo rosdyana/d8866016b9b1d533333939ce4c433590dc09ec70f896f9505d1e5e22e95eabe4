@@ -16,6 +16,9 @@ dependencies = [
 api = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
+    # The /mcp endpoint is mounted into this same app, so the MCP SDK ships
+    # in the light api image rather than the browser-heavy worker one.
+    "mcp>=2.1",
 ]
 worker = [
     # httpx is still the robots.txt client - a well-known text file whose
