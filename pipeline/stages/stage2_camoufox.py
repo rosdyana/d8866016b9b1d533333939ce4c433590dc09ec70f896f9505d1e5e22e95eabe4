@@ -15,6 +15,7 @@ from common.errors import UnsupportedContentType
 from pipeline.browser.settle import settle_until_stable
 from pipeline.browser.slots import BrowserSlots
 from pipeline.consent.dismiss import attach_dialog_autodismiss, dismiss_consent_and_overlays
+from pipeline.quality import is_good_enough
 from pipeline.stages.base import FetchResult, Stage
 from pipeline.stages.content_type import guard_html_content_type
 
@@ -70,10 +71,16 @@ class Stage2Camoufox(Stage):
 
                 await dismiss_consent_and_overlays(page)
 
-                html = await settle_until_stable(
-                    page.content, self.timeout_seconds * _SETTLE_BUDGET_RATIO
-                )
                 status_code = response.status if response is not None else 200
+                # Akamai's interstitial is a static document while its
+                # sensor runs, so settling on size alone hands back the
+                # challenge page. Gate the early return on the same verdict
+                # the orchestrator will apply to this result anyway.
+                html = await settle_until_stable(
+                    page.content,
+                    self.timeout_seconds * _SETTLE_BUDGET_RATIO,
+                    is_settled=lambda candidate: is_good_enough(status_code, candidate).passed,
+                )
                 final_url = page.url
 
         return FetchResult(html=html, status_code=status_code, final_url=final_url)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import httpx
 from arq.connections import RedisSettings
 from curl_cffi import AsyncSession
 
@@ -20,16 +19,18 @@ async def startup(ctx: dict) -> None:
     settings = get_settings()
     ctx["settings"] = settings
 
-    # httpx stays for robots.txt only - it is a small text file from a
-    # well-known path, and fetching it is not what gets fingerprinted.
-    ctx["http_client"] = httpx.AsyncClient()
+    # One impersonating session for everything that talks to a target host,
+    # robots.txt included: the block on acer.com/hp.com is at the TLS layer,
+    # so a plain client cannot read robots.txt either - and that failure is
+    # fail-closed, which turned an allow-all robots.txt into a hard
+    # robots_disallowed for the whole host.
+    ctx["curl_session"] = AsyncSession()
     ctx["robots_gate"] = RobotsGate(
-        http_client=ctx["http_client"],
+        session=ctx["curl_session"],
         cache=RobotsCache(ctx["redis"], settings.robots_cache_ttl_seconds),
         user_agent=settings.user_agent,
+        impersonate=settings.curl_impersonate_target,
     )
-
-    ctx["curl_session"] = AsyncSession()
     ctx["browser_slots"] = BrowserSlots(max_concurrent_browsers=settings.max_concurrent_browsers)
     ctx["domain_memory"] = DomainMemory(ctx["redis"], settings.domain_memory_ttl_seconds)
     ctx["scrape_cache"] = ScrapeCache(ctx["redis"], settings.scrape_cache_ttl_seconds)
@@ -38,7 +39,6 @@ async def startup(ctx: dict) -> None:
 
 async def shutdown(ctx: dict) -> None:
     await ctx["curl_session"].close()
-    await ctx["http_client"].aclose()
 
 
 class WorkerSettings:

@@ -5,6 +5,16 @@ says nothing about transport (plain HTTP vs. a rendered browser) or IP
 source (direct vs. proxy). This gate therefore runs once, before whichever
 stage ends up doing the actual fetch, and every stage is subject to the
 same decision.
+
+It fetches over curl_cffi, not httpx, for the same reason Stage 1 does.
+"robots.txt is a small well-known text file, so fetching it is not what
+gets fingerprinted" sounds right and is false: the block on acer.com and
+hp.com happens at the TLS/HTTP2 handshake, before the path is ever sent.
+Measured 2026-08-29, httpx read-times-out on `store.acer.com/robots.txt`
+and `www.acer.com/robots.txt` under every User-Agent, while curl_cffi gets
+a normal 200. Because an unreachable robots.txt fails *closed*, an httpx
+client turned a file that explicitly allows the URL into a permanent
+`robots_disallowed` for the whole host.
 """
 
 from __future__ import annotations
@@ -12,7 +22,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-import httpx
+from curl_cffi import AsyncSession
+from curl_cffi.requests.exceptions import RequestException
 from protego import Protego
 
 from common.errors import RobotsFetchFailed
@@ -28,14 +39,16 @@ class RobotsDecision:
 class RobotsGate:
     def __init__(
         self,
-        http_client: httpx.AsyncClient,
+        session: AsyncSession,
         cache: RobotsCache,
         user_agent: str,
+        impersonate: str = "chrome",
         fetch_timeout_seconds: float = 5.0,
     ) -> None:
-        self._http_client = http_client
+        self._session = session
         self._cache = cache
         self._user_agent = user_agent
+        self._impersonate = impersonate
         self._fetch_timeout = fetch_timeout_seconds
 
     async def check(self, url: str) -> RobotsDecision:
@@ -55,14 +68,16 @@ class RobotsGate:
 
         robots_url = f"{origin}/robots.txt"
         try:
-            response = await self._http_client.get(
+            # No User-Agent header: `impersonate` installs a coherent one,
+            # and `self._user_agent` is for matching directives, not for
+            # announcing ourselves over a fingerprint that says otherwise.
+            response = await self._session.get(
                 robots_url,
+                impersonate=self._impersonate,
+                allow_redirects=True,
                 timeout=self._fetch_timeout,
-                headers={"User-Agent": self._user_agent},
             )
-        except httpx.HTTPError as exc:
-            # Fail CLOSED: we couldn't verify permission, so treat this
-            # request as disallowed rather than assuming it's fine.
+        except RequestException as exc:
             raise RobotsFetchFailed(f"robots.txt fetch failed for {host}: {exc}") from exc
 
         if response.status_code == 404:

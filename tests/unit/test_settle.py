@@ -12,6 +12,7 @@ import asyncio
 import pytest
 
 from pipeline.browser.settle import settle_until_stable
+from pipeline.quality import is_good_enough
 
 
 def _grower(sizes):
@@ -63,3 +64,59 @@ async def test_never_exceeds_its_budget_on_a_page_that_never_settles():
     assert elapsed < 2.0, "blew through the budget"
     # Best effort, not an exception: whatever it had when time ran out.
     assert len(html) > 0
+
+
+@pytest.mark.asyncio
+async def test_waits_out_a_static_bot_challenge_before_the_real_page():
+    # Regression, store.acer.com 2026-08-29: Akamai's interstitial is a
+    # byte-identical 2,615-byte document for ~4.5s while its sensor JS
+    # runs, then it is replaced by the real 595KB page. Size stability
+    # alone therefore "settles" on the challenge - all three stages came
+    # back text_too_short on a page that renders fine at t+9s.
+    challenge = "<html><body><div id='sec-if-cpt-container'></div></body></html>"
+    real_page = "<html><body>" + ("<p>Nitro V 16 specifications. </p>" * 40) + "</body></html>"
+
+    polls = {"n": 0}
+
+    async def get_html():
+        polls["n"] += 1
+        return challenge if polls["n"] <= 9 else real_page
+
+    html = await settle_until_stable(
+        get_html,
+        budget_seconds=5.0,
+        is_settled=lambda candidate: is_good_enough(200, candidate).passed,
+        poll_interval_seconds=0.01,
+    )
+    assert html == real_page, "settled on the bot-challenge page"
+
+
+@pytest.mark.asyncio
+async def test_without_the_predicate_the_same_sequence_settles_on_the_challenge():
+    # Locks in what the predicate is actually for: the plateau is long
+    # enough that plain size-stability cannot tell it from a finished page.
+    challenge = "<html><body><div id='sec-if-cpt-container'></div></body></html>"
+
+    async def get_html():
+        return challenge
+
+    html = await settle_until_stable(get_html, budget_seconds=5.0, poll_interval_seconds=0.01)
+    assert html == challenge
+
+
+@pytest.mark.asyncio
+async def test_predicate_still_respects_the_budget():
+    # A page that never satisfies the predicate must not hang - the budget
+    # is still the hard cap, and whatever it had is still returned.
+    async def get_html():
+        return "<html><body></body></html>"
+
+    started = asyncio.get_running_loop().time()
+    html = await settle_until_stable(
+        get_html,
+        budget_seconds=0.3,
+        is_settled=lambda candidate: is_good_enough(200, candidate).passed,
+        poll_interval_seconds=0.01,
+    )
+    assert asyncio.get_running_loop().time() - started < 2.0
+    assert html == "<html><body></body></html>"

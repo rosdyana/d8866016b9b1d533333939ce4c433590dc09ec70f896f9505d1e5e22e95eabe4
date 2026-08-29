@@ -64,12 +64,12 @@ def _build_stages(ctx: dict, settings) -> list:
         Stage2Camoufox(
             slots=ctx["browser_slots"],
             timeout_seconds=settings.stage2_timeout_seconds,
-            headless="virtual" if settings.browser_use_xvfb else True,
+            headless="virtual" if settings.stage2_use_xvfb else True,
         ),
         Stage3SeleniumBase(
             slots=ctx["browser_slots"],
             timeout_seconds=settings.stage3_timeout_seconds,
-            use_xvfb=settings.browser_use_xvfb,
+            use_xvfb=settings.stage3_use_xvfb,
         ),
     ]
 

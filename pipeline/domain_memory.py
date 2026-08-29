@@ -24,3 +24,8 @@ class DomainMemory:
 
     async def record_success(self, host: str, stage_name: str) -> None:
         await self._redis.set(_KEY_PREFIX + host, stage_name, ex=self._ttl)
+
+    async def forget(self, host: str) -> None:
+        """Drop a shortcut that has stopped working, so the next request
+        re-probes from Stage 1 instead of waiting out the TTL."""
+        await self._redis.delete(_KEY_PREFIX + host)

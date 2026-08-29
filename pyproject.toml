@@ -21,12 +21,11 @@ api = [
     "mcp>=2.1",
 ]
 worker = [
-    # httpx is still the robots.txt client - a well-known text file whose
-    # fetch is not what gets fingerprinted.
-    "httpx>=0.27",
     "protego>=0.3.1",
-    # Stage 1: real browser TLS/JA3 + HTTP/2 fingerprints. hp.com and
-    # acer.com return zero bytes to a plain client and 200 to this one.
+    # Stage 1 *and* the robots.txt gate: real browser TLS/JA3 + HTTP/2
+    # fingerprints. hp.com and acer.com return zero bytes to a plain client
+    # and 200 to this one - including for /robots.txt, which is why the
+    # gate no longer uses httpx.
     "curl_cffi>=0.7",
     # Stage 2: patched Firefox. Pulls playwright in transitively, which
     # pipeline/consent/dismiss.py imports directly.
@@ -45,6 +44,9 @@ worker = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    # Tests only: respx mocks it, and the API routes are driven through
+    # httpx.ASGITransport. No production code path uses httpx any more.
+    "httpx>=0.27",
     "respx>=0.20",
 ]
 

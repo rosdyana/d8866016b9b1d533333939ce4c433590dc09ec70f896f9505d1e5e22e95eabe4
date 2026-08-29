@@ -1,5 +1,6 @@
 import pytest
 
+from common.errors import AllStagesFailed
 from pipeline.domain_memory import DomainMemory
 from pipeline.orchestrator import run_pipeline
 from pipeline.stages.base import FetchResult, Stage
@@ -16,6 +17,9 @@ class FakeRedis:
 
     async def set(self, key: str, value, ex=None):
         self._store[key] = value
+
+    async def delete(self, key: str) -> None:
+        self._store.pop(key, None)
 
 
 class FakeRobotsGate:
@@ -87,3 +91,55 @@ async def test_records_success_for_future_requests():
     await run_pipeline("http://example.com/page", FakeRobotsGate(), [stage1], domain_memory=memory)
 
     assert await memory.get_last_successful_stage("example.com") == "stage1"
+
+
+@pytest.mark.asyncio
+async def test_retries_the_skipped_stages_when_the_remembered_one_fails():
+    # Regression, store.acer.com: one Stage 3 success pinned the host to
+    # Stage 3 for the 7-day TTL, so when Stage 3 started failing the
+    # earlier stage that could still fetch the page never ran again.
+    memory = DomainMemory(FakeRedis(), ttl_seconds=3600)
+    await memory.record_success("example.com", "stage2")
+
+    stage1 = RecordingStage("stage1")
+    stage2 = FailingStage("stage2")
+    result = await run_pipeline(
+        "http://example.com/page", FakeRobotsGate(), [stage1, stage2], domain_memory=memory
+    )
+
+    assert stage2.called is True  # the shortcut is still tried first
+    assert stage1.called is True  # ...but is no longer a dead end
+    assert result.stage_won == "stage1"
+
+
+@pytest.mark.asyncio
+async def test_forgets_a_shortcut_that_no_longer_works():
+    memory = DomainMemory(FakeRedis(), ttl_seconds=3600)
+    await memory.record_success("example.com", "stage2")
+
+    with pytest.raises(AllStagesFailed):
+        await run_pipeline(
+            "http://example.com/page",
+            FakeRobotsGate(),
+            [FailingStage("stage1"), FailingStage("stage2")],
+            domain_memory=memory,
+        )
+
+    assert await memory.get_last_successful_stage("example.com") is None
+
+
+@pytest.mark.asyncio
+async def test_every_stage_tried_is_named_in_the_failure():
+    memory = DomainMemory(FakeRedis(), ttl_seconds=3600)
+    await memory.record_success("example.com", "stage2")
+
+    with pytest.raises(AllStagesFailed) as exc:
+        await run_pipeline(
+            "http://example.com/page",
+            FakeRobotsGate(),
+            [FailingStage("stage1"), FailingStage("stage2")],
+            domain_memory=memory,
+        )
+
+    assert "stage1:RuntimeError" in str(exc.value)
+    assert "stage2:RuntimeError" in str(exc.value)

@@ -17,6 +17,7 @@ from seleniumbase import cdp_driver
 
 from pipeline.browser.settle import settle_until_stable
 from pipeline.browser.slots import BrowserSlots
+from pipeline.quality import is_good_enough
 from pipeline.stages.base import FetchResult, Stage
 from pipeline.stages.content_type import guard_html_content_type
 
@@ -91,7 +92,14 @@ class Stage3SeleniumBase(Stage):
                     await page.solve_captcha()
 
                 html = await settle_until_stable(
-                    page.get_content, self.timeout_seconds * _SETTLE_BUDGET_RATIO
+                    page.get_content,
+                    self.timeout_seconds * _SETTLE_BUDGET_RATIO,
+                    # Same reason as Stage 2: a challenge page is static
+                    # while it works, so a stable size is not "done". The
+                    # status is only resolvable after settling here, so the
+                    # predicate asks the content question alone - the real
+                    # status check is the orchestrator's, on the result below.
+                    is_settled=lambda candidate: is_good_enough(200, candidate).passed,
                 )
                 final_url = await page.evaluate("window.location.href") or url
 

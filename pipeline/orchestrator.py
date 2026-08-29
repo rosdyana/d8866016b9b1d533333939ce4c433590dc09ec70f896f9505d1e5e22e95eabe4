@@ -54,9 +54,15 @@ async def run_pipeline(
     host = urlparse(url).netloc
     last_successful = await domain_memory.get_last_successful_stage(host) if domain_memory else None
     ordered_stages = _ordered_from_memory(stages, last_successful)
+    # A remembered stage that has started failing must not become a dead
+    # end. store.acer.com was pinned to Stage 3 by one success, so the
+    # stage that could actually fetch it never ran again and the entry sat
+    # there for the whole 7-day TTL. Try the stages the memory let us skip
+    # before giving up, so a changed anti-bot posture heals in one request.
+    skipped_stages = [stage for stage in stages if stage not in ordered_stages]
 
     failures: list[str] = []
-    for stage in ordered_stages:
+    for stage in (*ordered_stages, *skipped_stages):
         try:
             result: FetchResult = await asyncio.wait_for(
                 stage.fetch(url), timeout=stage.timeout_seconds
@@ -84,5 +90,11 @@ async def run_pipeline(
                 final_url=result.final_url,
             )
         failures.append(f"{stage.name}:{verdict.reason}")
+
+    if domain_memory is not None and last_successful is not None:
+        # The shortcut is stale: every stage failed, including the one this
+        # host was remembered for. Drop it so the next request re-probes
+        # from Stage 1 rather than repeating the same wrong ordering.
+        await domain_memory.forget(host)
 
     raise AllStagesFailed(f"all stages failed for {url}: {', '.join(failures)}")

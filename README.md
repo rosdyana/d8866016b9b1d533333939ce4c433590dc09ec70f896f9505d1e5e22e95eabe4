@@ -186,8 +186,10 @@ detected — so run them before trusting a change to any stage:
 They check both browser stages against `bot.sannysoft.com` and
 `browserscan.net/bot-detection`, assert Stage 1 still defeats the TLS-layer
 blocks on `hp.com`/`acer.com`, and drive Stage 3 through a real Cloudflare
-Turnstile. On macOS/Windows the browser stages fall back to plain headless
-(Xvfb is Linux-only), so a local pass is the weaker configuration.
+Turnstile. Stage 3 falls back to plain headless on macOS/Windows (Xvfb is
+Linux-only), so a local pass is the weaker configuration for that stage.
+Stage 2 is headless everywhere on purpose — see `STAGE2_USE_XVFB` in
+`env.example` for the measurement behind that.
 
 Running the API and worker outside Docker needs a local Redis plus `AUTH_TOKEN`/`REDIS_URL` set (see `env.example`):
 
