@@ -25,6 +25,13 @@ _CHALLENGE_MARKERS = (
     "captcha",
     "attention required",
     "ddos protection by",
+    # reddit.com serves this interstitial with HTTP 200 and ~270 chars of
+    # visible text, so nothing else here catches it: not the status check,
+    # not _MIN_TEXT_LENGTH, and not the unrendered-shell check (its 167KB of
+    # inline CSS/SVG lands just under _UNRENDERED_MIN_HTML_LENGTH). Without
+    # this marker Stage 1 "succeeds" on the challenge page and the pipeline
+    # never escalates to the browser stage that actually gets the content.
+    "prove your humanity",
 )
 
 _TAG_RE = re.compile(r"<[^>]+>")

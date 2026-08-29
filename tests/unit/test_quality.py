@@ -57,3 +57,18 @@ def test_fails_for_error_status():
     verdict = is_good_enough(500, REAL_PAGE)
     assert verdict.passed is False
     assert verdict.reason == "error_status_500"
+
+
+def test_fails_for_reddit_prove_your_humanity_interstitial():
+    # Verbatim visible text of the page reddit.com returns to Stage 1, which
+    # it serves with HTTP 200 - see the marker's comment in quality.py.
+    html = (
+        "<html><body><h1>Prove your humanity</h1>"
+        "<p>We&rsquo;re committed to safety and security. But not for bots. "
+        "Complete the challenge below and let us know you&rsquo;re a real person.</p>"
+        "<footer>Reddit, Inc. All rights reserved. User Agreement Privacy Policy "
+        "Content Policy Help</footer></body></html>"
+    )
+    verdict = is_good_enough(200, html)
+    assert verdict.passed is False
+    assert verdict.reason == "challenge_marker:prove your humanity"
