@@ -5,37 +5,12 @@ from mcp import Client
 from mcp.server.mcpserver.exceptions import ToolError
 from starlette.datastructures import State
 
+from app.jobs.cache import ScrapeCache, cache_key
 from app.jobs.models import Job
 from app.jobs.store import JobStore
 from app.mcp_server.server import _await_job, build_mcp_server
 from extract.models import ExtractionOutput
-
-
-class FakeRedis:
-    def __init__(self) -> None:
-        self._store: dict[str, bytes] = {}
-
-    async def get(self, key: str):
-        return self._store.get(key)
-
-    async def set(self, key: str, value, ex=None):
-        self._store[key] = value
-
-
-class FakeArqPool:
-    """Records enqueues; optionally finishes the job the way the worker would."""
-
-    def __init__(self, redis: FakeRedis, finish_with: Job | None = None) -> None:
-        self._redis = redis
-        self._finish_with = finish_with
-        self.calls: list[tuple] = []
-
-    async def enqueue_job(self, *args):
-        self.calls.append(args)
-        if self._finish_with is not None:
-            job_id = args[1]
-            done = self._finish_with.model_copy(update={"id": job_id})
-            await JobStore(self._redis, 60).create(done)
+from tests.unit.fakes import FakeArqPool, FakeRedis
 
 
 class FakeContext:
@@ -158,3 +133,56 @@ async def test_unknown_job_id_is_a_tool_error():
     store = JobStore(FakeRedis(), 60)
     with pytest.raises(ToolError):
         await _await_job(store, "nope", wait_seconds=5.0, ctx=FakeContext())
+
+
+async def test_scrape_serves_a_warm_cache_entry_without_enqueuing():
+    redis = FakeRedis()
+    key = cache_key("https://example.com/", ["llm_text"], True)
+    await ScrapeCache(redis, 60).set(
+        key,
+        url="https://example.com/",
+        formats=["llm_text"],
+        robotstxt=True,
+        stage_won="stage2_camoufox",
+        job_id="earlier-job",
+        result=ExtractionOutput(llm_text="the cached text"),
+    )
+    pool = FakeArqPool(redis)
+
+    async with Client(build_mcp_server(_state(redis, pool))) as client:
+        result = await client.call_tool("scrape", {"url": "https://example.com/"})
+
+    payload = _payload(result)
+    assert payload["status"] == "success"
+    assert payload["llm_text"] == "the cached text"
+    assert payload["stage_won"] == "stage2_camoufox"
+    assert pool.calls == []
+
+
+async def test_scrape_refresh_true_enqueues_despite_a_warm_entry():
+    redis = FakeRedis()
+    await ScrapeCache(redis, 60).set(
+        cache_key("https://example.com/", ["llm_text"], True),
+        url="https://example.com/",
+        formats=["llm_text"],
+        robotstxt=True,
+        stage_won="stage1_curl_cffi",
+        job_id="earlier-job",
+        result=ExtractionOutput(llm_text="stale"),
+    )
+    finished = Job(
+        id="placeholder",
+        url="https://example.com/",
+        status="success",
+        stage_won="stage1_curl_cffi",
+        result=ExtractionOutput(llm_text="fresh"),
+    )
+    pool = FakeArqPool(redis, finish_with=finished)
+
+    async with Client(build_mcp_server(_state(redis, pool))) as client:
+        result = await client.call_tool(
+            "scrape", {"url": "https://example.com/", "refresh": True}
+        )
+
+    assert _payload(result)["llm_text"] == "fresh"
+    assert len(pool.calls) == 1

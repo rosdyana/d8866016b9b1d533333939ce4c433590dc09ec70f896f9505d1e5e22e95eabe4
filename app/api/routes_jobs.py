@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.schemas import JobCreateRequest
@@ -9,6 +7,7 @@ from app.auth.bearer import require_bearer_token
 from app.config import Settings, get_settings
 from app.jobs.models import Job
 from app.jobs.store import JobStore
+from app.jobs.submit import submit_scrape
 
 router = APIRouter(tags=["jobs"], dependencies=[Depends(require_bearer_token)])
 
@@ -19,20 +18,18 @@ async def create_job(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> Job:
-    job = Job(
-        id=uuid.uuid4().hex,
+    # Still 202 on a cache hit, so the status code never varies per request -
+    # the body says `cached: true` with `status: "success"`, and an existing
+    # poller finishes on its first GET.
+    return await submit_scrape(
+        request.app.state.redis,
+        request.app.state.arq_pool,
+        settings,
         url=str(payload.url),
         formats=payload.formats,
         robotstxt=payload.robotstxt,
+        refresh=payload.refresh,
     )
-
-    store = JobStore(request.app.state.redis, settings.job_result_ttl_seconds)
-    await store.create(job)
-
-    await request.app.state.arq_pool.enqueue_job(
-        "run_scrape_job", job.id, job.url, job.formats, job.robotstxt
-    )
-    return job
 
 
 @router.get("/jobs/{job_id}", response_model=Job)

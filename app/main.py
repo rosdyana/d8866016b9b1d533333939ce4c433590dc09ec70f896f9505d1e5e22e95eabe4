@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
 from redis.asyncio import Redis
 
+from app.api.routes_cache import router as cache_router
 from app.api.routes_health import router as health_router
 from app.api.routes_jobs import router as jobs_router
 from app.auth.bearer import BearerTokenMiddleware
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="ccscraper", lifespan=lifespan)
     app.include_router(health_router)
     app.include_router(jobs_router)
+    app.include_router(cache_router)
 
     # Built here rather than in the lifespan because `session_manager` only
     # exists once streamable_http_app() has been called, and the lifespan

@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     robots_cache_ttl_seconds: int = 86400
     job_result_ttl_seconds: int = 259200
 
+    scrape_cache_enabled: bool = True
+    scrape_cache_ttl_seconds: int = 2592000
+    # Redis runs with no maxmemory and the default noeviction policy, and
+    # raw_html is routinely megabytes - without a cap one pathological page
+    # stays pinned for the whole 30 days.
+    scrape_cache_max_entry_bytes: int = 2_097_152
+
     # Each slot is a whole browser process, not a context off a shared one.
     max_concurrent_browsers: int = 2
     # Stage 2/3 run a virtual display rather than true headless, which is

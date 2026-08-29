@@ -5,6 +5,7 @@ from arq.connections import RedisSettings
 from curl_cffi import AsyncSession
 
 from app.config import get_settings
+from app.jobs.cache import ScrapeCache
 from common.logging import configure_logging
 from common.rate_limit import PerDomainConcurrencyLimiter
 from pipeline.browser.slots import BrowserSlots
@@ -31,6 +32,7 @@ async def startup(ctx: dict) -> None:
     ctx["curl_session"] = AsyncSession()
     ctx["browser_slots"] = BrowserSlots(max_concurrent_browsers=settings.max_concurrent_browsers)
     ctx["domain_memory"] = DomainMemory(ctx["redis"], settings.domain_memory_ttl_seconds)
+    ctx["scrape_cache"] = ScrapeCache(ctx["redis"], settings.scrape_cache_ttl_seconds)
     ctx["rate_limiter"] = PerDomainConcurrencyLimiter(settings.per_domain_max_concurrency)
 
 

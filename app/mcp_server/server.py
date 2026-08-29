@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from typing import Annotated
 
 from mcp.server import MCPServer
@@ -13,6 +12,7 @@ from starlette.datastructures import State
 from app.config import get_settings
 from app.jobs.models import Job, OutputFormat
 from app.jobs.store import JobStore
+from app.jobs.submit import submit_scrape
 from app.mcp_server.models import ScrapeResult
 
 _PENDING = ("queued", "running")
@@ -98,6 +98,15 @@ def build_mcp_server(state: State) -> MCPServer:
             bool,
             Field(description="Respect the site's robots.txt. Set false only to deliberately override it."),
         ] = True,
+        refresh: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Fetch again instead of serving a cached result. Use only when the page "
+                    "is expected to have changed - a normal call is already up to date enough."
+                )
+            ),
+        ] = False,
         wait_seconds: Annotated[
             float,
             Field(ge=5, le=300, description="How long to wait for the content before handing back a job_id."),
@@ -116,16 +125,22 @@ def build_mcp_server(state: State) -> MCPServer:
         unsupported_content_type (the URL is a PDF or image, not a page -
         do not retry); timeout; error; or queued/running, meaning the wait
         budget expired - call get_scrape_result with the returned job_id.
+
+        A page fetched recently comes back from cache immediately; pass
+        refresh=true to bypass that and fetch again.
         """
         settings = get_settings()
-        job = Job(id=uuid.uuid4().hex, url=str(url), formats=formats, robotstxt=robotstxt)
+        job = await submit_scrape(
+            state.redis,
+            state.arq_pool,
+            settings,
+            url=str(url),
+            formats=formats,
+            robotstxt=robotstxt,
+            refresh=refresh,
+        )
 
         store = JobStore(state.redis, settings.job_result_ttl_seconds)
-        await store.create(job)
-
-        await state.arq_pool.enqueue_job(
-            "run_scrape_job", job.id, job.url, job.formats, job.robotstxt
-        )
         return await _await_job(store, job.id, wait_seconds, ctx)
 
     @mcp.tool()

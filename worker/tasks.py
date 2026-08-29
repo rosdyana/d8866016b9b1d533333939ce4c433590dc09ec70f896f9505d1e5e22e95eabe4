@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 import structlog
 
+from app.jobs.cache import cache_key
 from app.jobs.store import JobStore
 from common.errors import AllStagesFailed, RobotsDisallowed, UnsupportedContentType
 from common.logging import get_logger
@@ -15,6 +16,42 @@ from pipeline.stages.stage2_camoufox import Stage2Camoufox
 from pipeline.stages.stage3_seleniumbase import Stage3SeleniumBase
 
 logger = get_logger(__name__)
+
+
+async def _store_in_cache(
+    ctx: dict,
+    settings,
+    *,
+    job_id: str,
+    url: str,
+    formats: list[str],
+    robotstxt: bool,
+    stage_won: str,
+    output,
+) -> None:
+    """Populate the response cache after a success.
+
+    Never raises: the job is already recorded as succeeded by the time this
+    runs, and a Redis hiccup here must not turn it back into a failure.
+    """
+    try:
+        stored = await ctx["scrape_cache"].set(
+            cache_key(url, formats, robotstxt),
+            url=url,
+            formats=formats,
+            robotstxt=robotstxt,
+            stage_won=stage_won,
+            job_id=job_id,
+            result=output,
+            max_bytes=settings.scrape_cache_max_entry_bytes,
+        )
+        if not stored:
+            logger.info(
+                "scrape_cache_skipped_oversize",
+                max_bytes=settings.scrape_cache_max_entry_bytes,
+            )
+    except Exception:  # noqa: BLE001 - see docstring
+        logger.exception("scrape_cache_write_failed")
 
 
 def _build_stages(ctx: dict, settings) -> list:
@@ -98,5 +135,19 @@ async def run_scrape_job(
 
         logger.info("job_succeeded", stage_won=result.stage_won)
         await store.update(job_id, status="success", stage_won=result.stage_won, result=output)
+
+        # After the job is marked done, and only for a success: a transient
+        # block or timeout cached for 30 days would poison the URL for a month.
+        if settings.scrape_cache_enabled:
+            await _store_in_cache(
+                ctx,
+                settings,
+                job_id=job_id,
+                url=url,
+                formats=formats,
+                robotstxt=robotstxt,
+                stage_won=result.stage_won,
+                output=output,
+            )
     finally:
         structlog.contextvars.clear_contextvars()

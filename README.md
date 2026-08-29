@@ -78,6 +78,36 @@ GET /jobs/{id}
 
 `status` is one of `queued`, `running`, `success`, `blocked`, `robots_disallowed`, `unsupported_content_type`, `timeout`, `error`. On `success`, `result` holds the requested output formats and `stage_won` names which stage produced them.
 
+## Response cache
+
+A successful scrape is cached for 30 days (`SCRAPE_CACHE_TTL_SECONDS`) under a hash of the whole
+request body — `url` + `formats` + `robotstxt`. Repeat the same body and the result comes back
+immediately: still `202 Accepted`, but with `"cached": true` and `"status": "success"` already
+set, so a caller that just polls `GET /jobs/{id}` finishes on its first poll. Every job response
+carries the `cache_key` its request maps to.
+
+Because the key is the whole body, asking for a different set of `formats` is a different entry
+and re-fetches. Only successes are cached — a `blocked` or `timeout` is usually transient, and
+freezing one for 30 days would take the URL out of service for a month. A result larger than
+`SCRAPE_CACHE_MAX_ENTRY_BYTES` is returned normally but not stored.
+
+Add `"refresh": true` to the `POST /jobs` body to skip the cache and fetch again. The fresh
+result replaces the cached one on success; a failed refetch leaves the existing entry alone.
+
+**Manage it**
+
+```
+GET    /cache?cursor=0&limit=100   # metadata only, no page bodies; cursor 0 means end of scan
+GET    /cache/{key}                # one entry, with its full result
+DELETE /cache/{key}                # drop one entry -> 204, or 404 if unknown
+DELETE /cache                      # drop everything -> {"deleted": n}
+```
+
+`GET /cache` never returns page bodies — metadata and body are stored as separate Redis keys
+precisely so a listing doesn't drag megabytes of `raw_html` per row. `DELETE /cache` is scoped
+to the cache's own key prefixes; job records and the arq queue share the same Redis database and
+are left untouched. All four need the bearer token.
+
 ## MCP
 
 The same service also speaks the Model Context Protocol, so an LLM app can fetch a page as a
@@ -99,11 +129,16 @@ Two tools:
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `scrape` | `url`, `formats` (default `["llm_text"]`), `robotstxt` (default `true`), `wait_seconds` (default `45`, 5-300) | `status`, `stage_won`, and the requested format fields |
+| `scrape` | `url`, `formats` (default `["llm_text"]`), `robotstxt` (default `true`), `refresh` (default `false`), `wait_seconds` (default `45`, 5-300) | `status`, `stage_won`, and the requested format fields |
 | `get_scrape_result` | `job_id`, `wait_seconds` | the same shape |
 
 `formats` defaults to `llm_text` alone rather than all three: `raw_html` is routinely megabytes,
 and a tool result goes straight into a model's context.
+
+`scrape` reads through the same response cache the REST API does, so a page fetched in the last
+30 days comes back instantly; `refresh: true` bypasses that and fetches again. The cache
+management endpoints are deliberately not exposed as tools — a model shouldn't be clearing the
+service's cache.
 
 `scrape` submits the same job the REST API does and waits for it, reporting MCP progress
 notifications while it does. A page that resolves at Stage 1 comes back in well under a second;
