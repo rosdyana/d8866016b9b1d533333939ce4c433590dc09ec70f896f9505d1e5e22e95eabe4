@@ -24,8 +24,8 @@ from pipeline.stages.content_type import guard_html_content_type
 _SETTLE_BUDGET_RATIO = 0.4
 
 
-class Stage2Camoufox(Stage):
-    name = "stage2_camoufox"
+class Stage3Camoufox(Stage):
+    name = "stage3_camoufox"
 
     def __init__(
         self,
@@ -61,7 +61,7 @@ class Stage2Camoufox(Stage):
                     # Firefox answers a non-renderable content type by
                     # starting a download instead of navigating. Match
                     # Stage 1 and terminate rather than escalating - Stage
-                    # 3 can't turn a PDF into HTML either.
+                    # 4 can't turn a PDF into HTML either.
                     if "download" in str(exc).lower():
                         raise UnsupportedContentType("download") from exc
                     raise

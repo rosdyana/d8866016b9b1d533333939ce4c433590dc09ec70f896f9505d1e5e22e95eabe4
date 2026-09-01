@@ -1,6 +1,6 @@
 """Last resort: SeleniumBase CDP Mode - Chromium driven over the DevTools
 Protocol with no WebDriver attached, plus captcha solving for the Turnstile
-/ reCAPTCHA / hCaptcha interstitials that stop Stage 2.
+/ reCAPTCHA / hCaptcha interstitials that stop Stage 3.
 
 Only the async `cdp_driver` surface is used here. SeleniumBase's sync
 helpers (`sb_cdp.Chrome`, `SB()`) apply nest_asyncio to whatever loop is
@@ -55,8 +55,8 @@ class _DocumentResponses:
         return status, mime
 
 
-class Stage3SeleniumBase(Stage):
-    name = "stage3_seleniumbase"
+class Stage4SeleniumBase(Stage):
+    name = "stage4_seleniumbase"
 
     def __init__(
         self,
@@ -72,7 +72,7 @@ class Stage3SeleniumBase(Stage):
         async with self._slots.acquire():
             browser = await cdp_driver.start_async(
                 # Real headless is trivially detectable; a virtual display
-                # is the whole reason this stage can pass where Stage 2
+                # is the whole reason this stage can pass where Stage 3
                 # failed. xvfb is Linux-only, hence configurable.
                 xvfb=self._use_xvfb,
                 incognito=True,
@@ -94,7 +94,7 @@ class Stage3SeleniumBase(Stage):
                 html = await settle_until_stable(
                     page.get_content,
                     self.timeout_seconds * _SETTLE_BUDGET_RATIO,
-                    # Same reason as Stage 2: a challenge page is static
+                    # Same reason as Stage 3: a challenge page is static
                     # while it works, so a stable size is not "done". The
                     # status is only resolvable after settling here, so the
                     # predicate asks the content question alone - the real
