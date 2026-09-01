@@ -41,11 +41,11 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    # Two browser families (Firefox via Camoufox, Chromium via
-    # SeleniumBase) plus a virtual display, launched per job rather than
-    # pooled - 2g is not enough headroom.
-    mem_limit: 4g
-    # Chromium crashes on the default 64MB /dev/shm.
+    # Three browser engines (Playwright Chromium via crawl4ai, Firefox via
+    # Camoufox, apt Chromium via SeleniumBase) plus a virtual display,
+    # launched per job rather than pooled - 4g was sized for two.
+    mem_limit: 6g
+    # Chromium crashes on the default 64MB /dev/shm - now two of them.
     shm_size: "2g"
 
 

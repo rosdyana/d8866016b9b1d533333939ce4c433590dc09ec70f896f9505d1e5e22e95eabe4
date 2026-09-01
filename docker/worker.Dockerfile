@@ -2,17 +2,23 @@ FROM python:3.11-slim
 
 WORKDIR /srv
 
-# xvfb is load-bearing, not convenience: both browser stages run on a
-# virtual display rather than true headless, because headless mode is
-# trivially detectable and is the single biggest avoidable tell.
+# Three browser engines live in this image, installed three different ways:
 #
-# chromium is Stage 3's browser - SeleniumBase's CDP mode launches a real
-# Chrome/Chromium binary it finds on PATH (see its cdp_driver/config.py,
-# which searches for "chromium"/"chromium-browser"). Stage 2 does NOT need
-# a browser installed here: Camoufox ships its own patched Firefox, fetched
-# below. Nothing in this image uses Playwright's bundled browsers, so they
-# are deliberately not downloaded - only the shared libraries both engines
-# link against.
+#   Stage 2 crawl4ai      Playwright's bundled Chromium  (playwright install)
+#   Stage 3 Camoufox      its own patched Firefox        (camoufox fetch)
+#   Stage 4 SeleniumBase  the apt chromium on PATH       (apt, below)
+#
+# SeleniumBase's CDP mode launches whatever Chrome/Chromium binary it finds
+# on PATH (see its cdp_driver/config.py, which searches for
+# "chromium"/"chromium-browser"), which is why the apt package stays even
+# though Playwright now downloads a Chromium of its own.
+#
+# xvfb is load-bearing, not convenience: Stage 4 runs on a virtual display
+# rather than true headless, because headless Chromium is trivially
+# detectable. Stages 2 and 3 are headless on purpose - see STAGE3_USE_XVFB
+# in env.example for the measurement behind Camoufox's.
+#
+# The library list below is what all three engines link against.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb \
         chromium \
@@ -32,9 +38,29 @@ COPY common ./common
 
 RUN pip install --no-cache-dir ".[worker]"
 
-# Fetch Camoufox's Firefox build (plus its GeoIP database and addons) at
-# build time. Left to runtime, every worker would race to download the
-# same ~200MB on its first job.
+# Out of root's home, so adding a `user:` to the compose service later
+# doesn't silently lose the browser.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
+# Stage 2's Chromium. `--with-deps` installs any system libraries the
+# hand-listed set above misses; it is additive, not a replacement, because
+# Camoufox's Firefox and the apt chromium still need their own. It runs its
+# own `apt-get update`, which repopulates the lists the block above
+# deleted - clean them again in the same layer.
+RUN python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+# crawl4ai appends ".crawl4ai" itself and does the mkdir at *import* time
+# (its async_database, module scope), falling back to $HOME. That makes it
+# a requirement of `extract/converter.py`, not just of Stage 2, so it has
+# to be in the process environment before python starts - .env is too late.
+# Note the spelling: it reads CRAWL4_AI_*, not CRAWL4AI_*.
+ENV CRAWL4_AI_BASE_DIRECTORY=/var/lib/ccscraper
+RUN mkdir -p /var/lib/ccscraper/.crawl4ai
+
+# Stage 3's Firefox build (plus its GeoIP database and addons), at build
+# time. Left to runtime, every worker would race to download the same
+# ~200MB on its first job.
 RUN python -m camoufox fetch
 
 CMD ["arq", "worker.main.WorkerSettings"]

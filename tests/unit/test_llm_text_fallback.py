@@ -44,3 +44,38 @@ def test_product_page_keeps_the_specs():
 def test_empty_html_does_not_raise():
     assert to_llm_text("") in (None, "")
     assert to_llm_text("<html><body></body></html>") in (None, "")
+
+
+def test_the_guard_fires_when_the_pruner_keeps_almost_nothing(monkeypatch):
+    """The point of this module, tested directly rather than via the pruner.
+
+    The other tests here pass whenever the *current* pruner happens to be
+    permissive enough, which makes them a test of crawl4ai, not of the
+    fallback. This one forces the failure the fallback exists for: a pruner
+    that returns a plausible-looking snippet holding ~4% of the page.
+    """
+    import extract.llm_text as module
+
+    monkeypatch.setattr(
+        module,
+        "render_pruned_markdown",
+        lambda cleaned, url=None: ("Labor Day Sale. 3% back in rewards.",
+                                   "<div>Labor Day Sale. 3% back in rewards.</div>"),
+    )
+
+    out = module.to_llm_text(PRODUCT_PAGE) or ""
+    assert "Ryzen" in out, "the guard did not fall back to the visible text"
+    assert out != "Labor Day Sale. 3% back in rewards."
+
+
+def test_a_generous_pruner_result_is_kept_as_is(monkeypatch):
+    import extract.llm_text as module
+
+    full = module._visible_text(PRODUCT_PAGE)
+    monkeypatch.setattr(
+        module,
+        "render_pruned_markdown",
+        lambda cleaned, url=None: ("PRUNED MARKDOWN", f"<div>{full}</div>"),
+    )
+
+    assert module.to_llm_text(PRODUCT_PAGE) == "PRUNED MARKDOWN"

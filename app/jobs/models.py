@@ -22,6 +22,11 @@ OutputFormat = Literal["raw_html", "markdown", "llm_text"]
 
 ALL_FORMATS: tuple[OutputFormat, ...] = ("raw_html", "markdown", "llm_text")
 
+# Markdown alone is the default. A raw_html body is routinely megabytes and
+# most callers feed the result to a model; asking for the other two is one
+# field away. ALL_FORMATS stays the full set for anyone who wants it.
+DEFAULT_FORMATS: tuple[OutputFormat, ...] = ("markdown",)
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -30,7 +35,7 @@ def _utcnow() -> datetime:
 class Job(BaseModel):
     id: str
     url: str
-    formats: list[OutputFormat] = Field(default_factory=lambda: list(ALL_FORMATS))
+    formats: list[OutputFormat] = Field(default_factory=lambda: list(DEFAULT_FORMATS))
     robotstxt: bool = True
     status: JobStatus = "queued"
     stage_won: str | None = None

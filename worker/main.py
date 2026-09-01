@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from arq.connections import RedisSettings
 from curl_cffi import AsyncSession
+from firecrawl import AsyncFirecrawl
 
 from app.config import get_settings
 from app.jobs.cache import ScrapeCache
@@ -35,6 +36,14 @@ async def startup(ctx: dict) -> None:
     ctx["domain_memory"] = DomainMemory(ctx["redis"], settings.domain_memory_ttl_seconds)
     ctx["scrape_cache"] = ScrapeCache(ctx["redis"], settings.scrape_cache_ttl_seconds)
     ctx["rate_limiter"] = PerDomainConcurrencyLimiter(settings.per_domain_max_concurrency)
+    # None when no key is configured, which is how Stage 5 stays out of the
+    # chain entirely (see `worker/tasks.py:_build_stages`). AsyncFirecrawl
+    # exposes no close() and no async-context-manager; its internal httpx
+    # client is built with max_keepalive_connections=0, so it holds no idle
+    # sockets and needs no shutdown hook.
+    ctx["firecrawl"] = (
+        AsyncFirecrawl(api_key=settings.firecrawl_api_key) if settings.firecrawl_api_key else None
+    )
 
 
 async def shutdown(ctx: dict) -> None:

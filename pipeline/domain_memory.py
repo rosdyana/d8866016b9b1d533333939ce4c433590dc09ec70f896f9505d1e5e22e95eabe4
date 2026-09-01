@@ -1,4 +1,4 @@
-"""Stage 5 (optimization): remembers which stage last succeeded for a
+"""Remembers which fetch stage last succeeded for a
 domain, so a repeat request can skip straight past stages already known to
 fail for it. A TTL keeps this from becoming permanent: if a site's anti-bot
 posture changes, the memory expires and the pipeline re-probes from Stage 1.

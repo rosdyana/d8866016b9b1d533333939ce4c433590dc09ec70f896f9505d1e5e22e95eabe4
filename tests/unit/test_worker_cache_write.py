@@ -29,12 +29,12 @@ async def _run(
     robotstxt: bool = True,
 ) -> None:
     monkeypatch.setattr(tasks, "_build_stages", lambda ctx, s: [])
-    monkeypatch.setattr(tasks, "build_from_html", lambda html, url, formats: output)
+    monkeypatch.setattr(tasks, "build_from_html", lambda html, url, formats, markdown=None: output)
 
     async def fake_pipeline(*args, **kwargs):
         if raises is not None:
             raise raises
-        return PipelineResult(stage_won="stage2_camoufox", html="<html></html>", final_url=_URL)
+        return PipelineResult(stage_won="stage3_camoufox", html="<html></html>", final_url=_URL)
 
     monkeypatch.setattr(tasks, "run_pipeline", fake_pipeline)
 
@@ -58,7 +58,7 @@ async def test_a_success_populates_the_cache(monkeypatch):
     entry = await ScrapeCache(redis, 60).get(cache_key(_URL, _FORMATS, True))
     assert entry is not None
     assert entry.result.llm_text == "the page text"
-    assert entry.meta.stage_won == "stage2_camoufox"
+    assert entry.meta.stage_won == "stage3_camoufox"
     assert entry.meta.job_id == "j1"
 
 
@@ -121,7 +121,7 @@ async def test_a_cache_write_failure_does_not_fail_the_job(monkeypatch):
 
     monkeypatch.setattr(tasks, "_build_stages", lambda ctx, s: [])
     monkeypatch.setattr(
-        tasks, "build_from_html", lambda html, url, formats: ExtractionOutput(llm_text="x")
+        tasks, "build_from_html", lambda html, url, formats, markdown=None: ExtractionOutput(llm_text="x")
     )
 
     async def fake_pipeline(*args, **kwargs):

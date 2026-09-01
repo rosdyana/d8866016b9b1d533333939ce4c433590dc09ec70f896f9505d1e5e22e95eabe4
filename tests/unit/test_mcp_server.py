@@ -115,7 +115,7 @@ async def test_get_scrape_result_collects_a_finished_job():
             id="abc123",
             url="https://example.com/",
             status="success",
-            stage_won="stage2_camoufox",
+            stage_won="stage3_camoufox",
             result=ExtractionOutput(llm_text="late text"),
         )
     )
@@ -143,7 +143,7 @@ async def test_scrape_serves_a_warm_cache_entry_without_enqueuing():
         url="https://example.com/",
         formats=["llm_text"],
         robotstxt=True,
-        stage_won="stage2_camoufox",
+        stage_won="stage3_camoufox",
         job_id="earlier-job",
         result=ExtractionOutput(llm_text="the cached text"),
     )
@@ -155,7 +155,7 @@ async def test_scrape_serves_a_warm_cache_entry_without_enqueuing():
     payload = _payload(result)
     assert payload["status"] == "success"
     assert payload["llm_text"] == "the cached text"
-    assert payload["stage_won"] == "stage2_camoufox"
+    assert payload["stage_won"] == "stage3_camoufox"
     assert pool.calls == []
 
 

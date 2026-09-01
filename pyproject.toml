@@ -27,25 +27,29 @@ worker = [
     # and 200 to this one - including for /robots.txt, which is why the
     # gate no longer uses httpx.
     "curl_cffi>=0.7",
-    # Stage 2: patched Firefox. Pulls playwright in transitively, which
+    # Stage 3: patched Firefox. Pulls playwright in transitively, which
     # pipeline/consent/dismiss.py imports directly.
     "camoufox[geoip]>=0.4",
-    # Stage 3: Chromium over CDP with no WebDriver attached.
+    # Stage 4: Chromium over CDP with no WebDriver attached.
     "seleniumbase>=4.30",
-    "trafilatura>=1.8",
-    # trafilatura -> justext imports lxml.html.clean, which lxml split out
-    # into this separate package starting at lxml 5.2. Depend on it
-    # directly by name, not via `lxml[html_clean]` - that extra is not
-    # actually declared in current lxml (6.x) release metadata, so pip
-    # silently no-ops it (warns, doesn't error) and the worker still
-    # crashes on import. Verified against a from-scratch venv, not assumed.
-    "lxml_html_clean",
+    # Stage 2 *and* the HTML -> Markdown converter every other stage's
+    # output goes through (`extract/converter.py`). It is a heavy
+    # dependency - litellm, numpy, pillow, nltk, bs4, rank-bm25,
+    # snowballstemmer, shapely, playwright, patchright - and worth it only
+    # because it earns its place twice. Needs `playwright install chromium`
+    # (see docker/worker.Dockerfile); camoufox's own Firefox is separate.
+    "crawl4ai>=0.9.3",
+    # Stage 5. Brings httpx back as a worker runtime dependency - which is
+    # fine here and nowhere else: it only ever talks to api.firecrawl.dev,
+    # a first-party API that does not fingerprint us.
+    "firecrawl-py>=4.41",
 ]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    # Tests only: respx mocks it, and the API routes are driven through
-    # httpx.ASGITransport. No production code path uses httpx any more.
+    # respx mocks it, and the API routes are driven through
+    # httpx.ASGITransport. The worker also gets httpx transitively via
+    # firecrawl-py, but no code path of ours uses it to fetch a target.
     "httpx>=0.27",
     "respx>=0.20",
 ]

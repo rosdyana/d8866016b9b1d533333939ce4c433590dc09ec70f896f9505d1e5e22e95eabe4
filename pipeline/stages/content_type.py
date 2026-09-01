@@ -2,8 +2,8 @@
 
 `UnsupportedContentType` is terminal for the whole pipeline (see
 `pipeline/orchestrator.py`) - escalating a PDF to a browser can't turn it
-into HTML either. Stage 1 reads the header off the response; Stage 2 reads
-it off Playwright's navigation response, so both must agree on the rule.
+into HTML either. Stage 1 reads the header off the response; Stage 2 off crawl4ai's, Stage
+3 off Playwright's navigation response, so they must agree on the rule.
 """
 
 from __future__ import annotations

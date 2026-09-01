@@ -1,4 +1,5 @@
-"""Bounds how many real browsers stages 2 and 3 may run at once.
+"""Bounds how many real browsers the browser stages (2, 3 and 4) may run
+at once.
 
 This replaced a pool that shared one long-lived Chromium and handed out
 contexts. Camoufox injects its fingerprint at *launch*, so a shared browser

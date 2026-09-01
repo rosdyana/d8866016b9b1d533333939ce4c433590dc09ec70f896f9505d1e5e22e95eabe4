@@ -25,10 +25,11 @@ class PipelineResult:
     stage_won: str
     html: str
     final_url: str
+    markdown: str | None = None
 
 
 def _ordered_from_memory(stages: list[Stage], last_successful: str | None) -> list[Stage]:
-    """Skip stages that are known to fail for this domain, per Stage 5's
+    """Skip stages that are known to fail for this domain, per the domain
     memory - but never skip past a stage that no longer exists (renamed,
     removed) or wasn't recorded."""
     if last_successful is None:
@@ -55,7 +56,8 @@ async def run_pipeline(
     last_successful = await domain_memory.get_last_successful_stage(host) if domain_memory else None
     ordered_stages = _ordered_from_memory(stages, last_successful)
     # A remembered stage that has started failing must not become a dead
-    # end. store.acer.com was pinned to Stage 3 by one success, so the
+    # end. store.acer.com was pinned to stage4_seleniumbase by one
+    # success, so the
     # stage that could actually fetch it never ran again and the entry sat
     # there for the whole 7-day TTL. Try the stages the memory let us skip
     # before giving up, so a changed anti-bot posture heals in one request.
@@ -88,6 +90,7 @@ async def run_pipeline(
                 stage_won=stage.name,
                 html=result.html,
                 final_url=result.final_url,
+                markdown=result.markdown,
             )
         failures.append(f"{stage.name}:{verdict.reason}")
 

@@ -1,15 +1,7 @@
 from __future__ import annotations
 
-import trafilatura
+from extract.converter import render_markdown, to_cleaned_html
 
 
 def to_markdown(html: str, url: str | None = None) -> str | None:
-    return trafilatura.extract(
-        html,
-        url=url,
-        output_format="markdown",
-        include_links=True,
-        include_images=True,
-        include_tables=True,
-        favor_recall=True,
-    )
+    return render_markdown(to_cleaned_html(html, url), url) or None

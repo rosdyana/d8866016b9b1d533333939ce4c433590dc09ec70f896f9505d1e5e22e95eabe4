@@ -12,8 +12,10 @@ from common.logging import get_logger
 from extract.normalize import build_from_html
 from pipeline.orchestrator import run_pipeline
 from pipeline.stages.stage1_curl_cffi import Stage1CurlCffi
-from pipeline.stages.stage2_camoufox import Stage2Camoufox
-from pipeline.stages.stage3_seleniumbase import Stage3SeleniumBase
+from pipeline.stages.stage2_crawl4ai import Stage2Crawl4ai
+from pipeline.stages.stage3_camoufox import Stage3Camoufox
+from pipeline.stages.stage4_seleniumbase import Stage4SeleniumBase
+from pipeline.stages.stage5_firecrawl import Stage5Firecrawl
 
 logger = get_logger(__name__)
 
@@ -55,23 +57,41 @@ async def _store_in_cache(
 
 
 def _build_stages(ctx: dict, settings) -> list:
-    return [
+    """The escalation chain, cheapest first - list order *is* the order."""
+    stages = [
         Stage1CurlCffi(
             session=ctx["curl_session"],
             impersonate=settings.curl_impersonate_target,
             timeout_seconds=settings.stage1_timeout_seconds,
         ),
-        Stage2Camoufox(
+        Stage2Crawl4ai(
             slots=ctx["browser_slots"],
             timeout_seconds=settings.stage2_timeout_seconds,
-            headless="virtual" if settings.stage2_use_xvfb else True,
+            headless=settings.stage2_headless,
         ),
-        Stage3SeleniumBase(
+        Stage3Camoufox(
             slots=ctx["browser_slots"],
             timeout_seconds=settings.stage3_timeout_seconds,
-            use_xvfb=settings.stage3_use_xvfb,
+            headless="virtual" if settings.stage3_use_xvfb else True,
+        ),
+        Stage4SeleniumBase(
+            slots=ctx["browser_slots"],
+            timeout_seconds=settings.stage4_timeout_seconds,
+            use_xvfb=settings.stage4_use_xvfb,
         ),
     ]
+    # Stage 5 costs money per call and sends the URL to a third party, so it
+    # exists only when an operator has opted in by configuring a key. No
+    # key, no stage - not a stage that fails at request time.
+    if ctx.get("firecrawl") is not None:
+        stages.append(
+            Stage5Firecrawl(
+                client=ctx["firecrawl"],
+                timeout_seconds=settings.stage5_timeout_seconds,
+                max_age_ms=settings.firecrawl_max_age_ms,
+            )
+        )
+    return stages
 
 
 async def run_scrape_job(
@@ -131,7 +151,14 @@ async def run_scrape_job(
             await store.update(job_id, status="error", error=str(exc))
             return
 
-        output = build_from_html(result.html, result.final_url, tuple(formats))
+        # Off the event loop: the conversion parses the whole document
+        # twice (lxml for the cleaned HTML, BeautifulSoup inside the
+        # pruner), synchronously, and a catalogue page is megabytes. Left
+        # inline it stalls every other job on this worker - and it runs even
+        # when Stage 1 won in 0.2s.
+        output = await asyncio.to_thread(
+            build_from_html, result.html, result.final_url, tuple(formats), result.markdown
+        )
 
         logger.info("job_succeeded", stage_won=result.stage_won)
         await store.update(job_id, status="success", stage_won=result.stage_won, result=output)

@@ -26,8 +26,21 @@ class Settings(BaseSettings):
 
     stage1_timeout_seconds: float = 15.0
     stage2_timeout_seconds: float = 45.0
-    stage3_timeout_seconds: float = 90.0
-    job_timeout_seconds: float = 180.0
+    stage3_timeout_seconds: float = 45.0
+    stage4_timeout_seconds: float = 90.0
+    stage5_timeout_seconds: float = 90.0
+    # Must exceed the sum of the stage budgets above (285s) or a cold, hard
+    # URL is killed mid-chain and reported as `timeout` instead of ever
+    # reaching the stage that could have fetched it.
+    job_timeout_seconds: float = 360.0
+
+    # Firecrawl is a paid third-party API and the only stage that leaves
+    # this host. An empty key omits Stage 5 from the chain entirely - see
+    # `worker/tasks.py:_build_stages`.
+    firecrawl_api_key: str = ""
+    # Firecrawl may reuse its own index entry up to this age (ms, 48h)
+    # instead of refetching. Independent of this service's response cache.
+    firecrawl_max_age_ms: int = 172_800_000
 
     # Comma-separated Host allowlist for the mounted /mcp endpoint, e.g.
     # "scraper.example.com,scraper.example.com:*". The MCP SDK arms
@@ -51,7 +64,7 @@ class Settings(BaseSettings):
 
     # Each slot is a whole browser process, not a context off a shared one.
     max_concurrent_browsers: int = 2
-    # The two engines measurably want opposite things, so they get separate
+    # The engines measurably want different things, so they get separate
     # knobs rather than one "browser_use_xvfb".
     #
     # Camoufox must NOT run on a virtual display. Measured in the worker
@@ -64,11 +77,16 @@ class Settings(BaseSettings):
     # llvmpipe is a contradiction. Headless exposes no WebGL at all, so
     # there is nothing to contradict. Neither mode is flagged by
     # bot.sannysoft.com or browserscan.net, so this costs no stealth.
-    stage2_use_xvfb: bool = False
-    # Stage 3 keeps it: headless *Chromium* is trivially detectable, and it
+    stage3_use_xvfb: bool = False
+    # Stage 4 keeps it: headless *Chromium* is trivially detectable, and it
     # made no difference to Akamai either way (403 in both modes).
     # Xvfb is Linux-only; off for local macOS dev.
-    stage3_use_xvfb: bool = True
+    stage4_use_xvfb: bool = True
+    # Stage 2 is Playwright Chromium, so the same "headless Chromium is
+    # detectable" argument applies - but crawl4ai's stealth patches are
+    # written for headless and it has no Xvfb path, so this is a plain
+    # on/off rather than a third display knob.
+    stage2_headless: bool = True
     per_domain_max_concurrency: int = 2
 
     domain_memory_enabled: bool = True

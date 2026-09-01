@@ -3,7 +3,8 @@
 Every other test in this suite proves the pipeline's plumbing. Nothing but
 this proves the premise the pipeline exists for - that these stages are not
 detected - so it hits the real endpoints on purpose. It needs network, and
-stages 2 and 3 need their browsers fetched (`python -m camoufox fetch`).
+stages 2-4 need their browsers fetched (`python -m camoufox fetch` and
+`python -m playwright install chromium`).
 """
 
 from __future__ import annotations
@@ -17,8 +18,9 @@ from extract.html_cleaner import clean_html
 from pipeline.browser.slots import BrowserSlots
 from pipeline.quality import is_good_enough
 from pipeline.stages.stage1_curl_cffi import Stage1CurlCffi
-from pipeline.stages.stage2_camoufox import Stage2Camoufox
-from pipeline.stages.stage3_seleniumbase import Stage3SeleniumBase
+from pipeline.stages.stage2_crawl4ai import Stage2Crawl4ai
+from pipeline.stages.stage3_camoufox import Stage3Camoufox
+from pipeline.stages.stage4_seleniumbase import Stage4SeleniumBase
 
 pytestmark = pytest.mark.live
 
@@ -38,11 +40,11 @@ TLS_BLOCKED = [
     "https://www.acer.com/us-en/laptops",
 ]
 
-# Stage 3 runs under Xvfb in production because headless *Chromium* is
+# Stage 4 runs under Xvfb in production because headless *Chromium* is
 # trivially detectable; a virtual display is Linux-only, so locally on
 # macOS/Windows it falls back to headless and a passing run here is the
-# weaker configuration. Stage 2 is headless everywhere on purpose - see
-# settings.stage2_use_xvfb for the measurement.
+# weaker configuration. Stage 3 is headless everywhere on purpose - see
+# settings.stage3_use_xvfb for the measurement.
 
 _DETECTION_MARKERS = ("headlesschrome", "webdriver detected", "you are a bot", "bot detected")
 
@@ -68,8 +70,8 @@ async def test_stage1_passes_tls_fingerprint_blocks(url):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("url", BOT_CHECKS)
-async def test_stage2_camoufox_is_not_detected(url):
-    stage = Stage2Camoufox(BrowserSlots(1), headless=True)
+async def test_stage3_camoufox_is_not_detected(url):
+    stage = Stage3Camoufox(BrowserSlots(1), headless=True)
     result = await stage.fetch(url)
     assert result.status_code < 400
     _assert_not_flagged(result.html)
@@ -77,19 +79,29 @@ async def test_stage2_camoufox_is_not_detected(url):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("url", BOT_CHECKS)
-async def test_stage3_seleniumbase_is_not_detected(url):
-    stage = Stage3SeleniumBase(BrowserSlots(1), use_xvfb=sys.platform.startswith("linux"))
+async def test_stage4_seleniumbase_is_not_detected(url):
+    stage = Stage4SeleniumBase(BrowserSlots(1), use_xvfb=sys.platform.startswith("linux"))
     result = await stage.fetch(url)
     assert result.status_code < 400
     _assert_not_flagged(result.html)
 
 
+# Stage 2 is deliberately absent from the two probes below. crawl4ai's
+# stealth is JavaScript-injected, and sannysoft dumps the *source* of the
+# overridden getters: instead of `function get userAgent() { [native code]
+# }` it renders crawl4ai's `current_ua.replace("HeadlessChrome/",
+# "Chrome/")` as page text. Measured 2026-09-02 - the override is visible
+# to any page that looks, which is exactly the class of tell Camoufox's
+# in-Gecko patching exists to avoid. Stage 2 is not there to beat
+# fingerprint checks; it is a cheap real browser for the majority of pages,
+# and anything that detects it escalates to Stage 3. Asserting otherwise
+# here would be asserting something untrue.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "stage_factory",
     [
-        lambda: Stage2Camoufox(BrowserSlots(1), headless=True),
-        lambda: Stage3SeleniumBase(BrowserSlots(1), use_xvfb=sys.platform.startswith("linux")),
+        lambda: Stage3Camoufox(BrowserSlots(1), headless=True),
+        lambda: Stage4SeleniumBase(BrowserSlots(1), use_xvfb=sys.platform.startswith("linux")),
     ],
     ids=["camoufox", "seleniumbase"],
 )
@@ -101,9 +113,37 @@ async def test_browser_stages_pass_sannysoft_webdriver_probe(stage_factory):
     assert "missing (passed)" in clean_html(result.html).lower()
 
 
+# The reason Stage 2 is in the chain at all. reddit.com answers Stage 1
+# with a "Prove your humanity" interstitial at HTTP 200, and reads the
+# request User-Agent to decide what to serve a browser: measured 2026-09-02
+# over 3 trials each, the HeadlessChrome header Playwright sends by default
+# got a 190KB shell every time, while the same engine's UA with the token
+# removed got 850KB of real content (see `_coherent_user_agent`).
 @pytest.mark.asyncio
-async def test_stage3_clears_cloudflare_turnstile():
-    stage = Stage3SeleniumBase(BrowserSlots(1), use_xvfb=sys.platform.startswith("linux"))
+async def test_stage2_crawl4ai_gets_past_reddits_interstitial():
+    result = await Stage2Crawl4ai(BrowserSlots(1), headless=True).fetch(
+        "https://www.reddit.com/r/programming/"
+    )
+    verdict = is_good_enough(result.status_code, result.html)
+    assert verdict.passed, f"reddit served a shell: {verdict.reason}"
+
+
+@pytest.mark.asyncio
+async def test_stage2_crawl4ai_announces_one_coherent_identity():
+    # The header UA, Sec-Ch-Ua and navigator.userAgent must agree, and none
+    # may say Headless. crawl4ai's default is a malformed Chrome 116 Linux
+    # string that contradicts all three.
+    from pipeline.stages.stage2_crawl4ai import _coherent_user_agent
+
+    user_agent = await _coherent_user_agent()
+    assert "Headless" not in user_agent
+    assert "(KHTML, like Gecko)" in user_agent
+    assert "Chrome/" in user_agent
+
+
+@pytest.mark.asyncio
+async def test_stage4_clears_cloudflare_turnstile():
+    stage = Stage4SeleniumBase(BrowserSlots(1), use_xvfb=sys.platform.startswith("linux"))
     result = await stage.fetch("https://seleniumbase.io/apps/turnstile")
     assert "success" in result.html.lower() or "verified" in result.html.lower()
 
@@ -119,8 +159,8 @@ AKAMAI_INTERSTITIAL = "https://store.acer.com/en-us/nitro-v-16-gaming-laptop-anv
 
 
 @pytest.mark.asyncio
-async def test_stage2_waits_out_the_akamai_interstitial():
-    stage = Stage2Camoufox(BrowserSlots(1), headless=True)
+async def test_stage3_waits_out_the_akamai_interstitial():
+    stage = Stage3Camoufox(BrowserSlots(1), headless=True)
     result = await stage.fetch(AKAMAI_INTERSTITIAL)
     verdict = is_good_enough(result.status_code, result.html)
     assert verdict.passed, f"settled on the challenge page instead: {verdict.reason}"

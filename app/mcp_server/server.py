@@ -89,8 +89,9 @@ def build_mcp_server(state: State) -> MCPServer:
             list[OutputFormat],
             Field(
                 description=(
-                    "Output formats to produce. llm_text is boilerplate-stripped plain text "
-                    "and the right default for reading a page; raw_html can be megabytes."
+                    "Output formats to produce. llm_text is boilerplate-pruned plain text "
+                    "and the right default for reading a page; markdown keeps the whole page "
+                    "with its headings and tables; raw_html can be megabytes."
                 )
             ),
         ] = ["llm_text"],

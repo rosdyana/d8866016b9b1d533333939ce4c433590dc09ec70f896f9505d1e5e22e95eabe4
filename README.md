@@ -1,6 +1,6 @@
 # ccscraper
 
-Self-hosted scraper service that turns a URL into clean, structured output — raw HTML, Markdown, and boilerplate-stripped LLM-ready text — via a staged fallback pipeline that only escalates to a heavier (slower, more expensive) fetch strategy when the cheaper one in front of it fails.
+Self-hosted scraper service that turns a URL into clean, structured output — Markdown by default, raw HTML and boilerplate-stripped LLM-ready text on request — via a staged fallback pipeline that only escalates to a heavier (slower, more expensive) fetch strategy when the cheaper one in front of it fails.
 
 Every stage presents a real browser's fingerprint, because the target workload is OEM product catalogues (Dell, Lenovo, HP, Acer) that are actively bot-protected. Where those pages ship schema.org `Product` data, it is parsed out of `ld+json` and prepended to the text formats as a table.
 
@@ -17,18 +17,40 @@ Stage 1: curl_cffi — real browser TLS/JA3 + HTTP/2 fingerprint, no browser
  │        ~0.3s                     ──passes quality check──▶ Extract
  │ fails
  ▼
-Stage 2: Camoufox — patched Firefox, fingerprint spoofed in C++ (not JS),
+Stage 2: crawl4ai — Playwright Chromium, JS-injected stealth
+ │        ~4-7s                            ──▶ Extract
+ │ fails
+ ▼
+Stage 3: Camoufox — patched Firefox, fingerprint spoofed in C++ (not JS),
  │        ~3-14s, cookie/popup dismissal   ──▶ Extract
  │ fails
  ▼
-Stage 3: SeleniumBase CDP Mode — Chromium over DevTools with no WebDriver
+Stage 4: SeleniumBase CDP Mode — Chromium over DevTools with no WebDriver
  │        ~10-25s, solves Turnstile/reCAPTCHA/hCaptcha   ──▶ Extract
+ │ fails
+ ▼
+Stage 5: Firecrawl — hosted API, only when FIRECRAWL_API_KEY is set
+ │        ~5-30s, paid per call            ──▶ Extract
  │ fails
  ▼
 job status: "blocked"
 ```
 
+Stage 2 is the cheap real browser: it handles most JavaScript-rendered pages
+in a few seconds, and it is the stage that gets past reddit.com's "Prove your
+humanity" interstitial. Its stealth is JavaScript-injected and therefore
+visible to a page that inspects its overrides, so anything that detects it
+escalates to Stage 3, whose fingerprint is patched inside Gecko instead.
+
+Stage 5 is the only stage that leaves the host or costs money. It is omitted
+from the chain entirely when `FIRECRAWL_API_KEY` is empty, and it is the only
+stage whose Markdown is used as-is rather than converted from HTML.
+
 Stage 1 is not merely an optimisation. Verified 2026-08-29: `hp.com` and `acer.com` kill the connection at the TLS/HTTP2 layer for a plain HTTP client — `HTTP/2 INTERNAL_ERROR`, or an HTTP/1.1 hang delivering zero bytes — regardless of `User-Agent`, and return a normal 200 to the identical request made with curl_cffi's `impersonate`. All four target vendors currently resolve at Stage 1.
+
+Every stage that returns HTML shares one converter (crawl4ai's scraper plus
+its html2text renderer, in `extract/converter.py`), so a page reads the same
+whichever stage won.
 
 A per-domain memory (Redis, 7-day TTL) remembers which stage last succeeded for a domain, so repeat requests skip straight past stages already known to fail for it.
 
@@ -66,7 +88,7 @@ POST /jobs
 {"url": "https://example.com/", "formats": ["raw_html", "markdown", "llm_text"]}
 ```
 
-`formats` defaults to all three if omitted. Add `"robotstxt": false` to skip the robots.txt permission check for that request — off by default; robots.txt is respected unless a caller explicitly opts out.
+`formats` defaults to `["markdown"]` if omitted — `raw_html` is routinely megabytes and most callers feed the result to a model. Ask for `raw_html`/`llm_text` explicitly when you want them. Add `"robotstxt": false` to skip the robots.txt permission check for that request — off by default; robots.txt is respected unless a caller explicitly opts out.
 
 Returns `202 Accepted` with a job object (`id`, `status: "queued"`).
 
@@ -132,7 +154,7 @@ Two tools:
 | `scrape` | `url`, `formats` (default `["llm_text"]`), `robotstxt` (default `true`), `refresh` (default `false`), `wait_seconds` (default `45`, 5-300) | `status`, `stage_won`, and the requested format fields |
 | `get_scrape_result` | `job_id`, `wait_seconds` | the same shape |
 
-`formats` defaults to `llm_text` alone rather than all three: `raw_html` is routinely megabytes,
+`formats` defaults to `llm_text` here, where the REST API defaults to `markdown`: a tool result goes straight into a model's context, and `raw_html` is routinely megabytes,
 and a tool result goes straight into a model's context.
 
 `scrape` reads through the same response cache the REST API does, so a page fetched in the last
@@ -158,19 +180,22 @@ header and is what the loopback-only port mapping above assumes. Set it (comma-s
 
 If you write your own MCP client and supply your own `httpx2.AsyncClient` to carry the
 `Authorization` header, set a long read timeout on it (`timeout=httpx2.Timeout(30.0,
-read=300.0)`) — the SDK only applies its own 300s read timeout to a client it created, and the
+read=400.0)`) — the SDK only applies its own 300s read timeout to a client it created, and the
 default 5s will abort a browser-stage fetch mid-flight.
 
 ## Configuration
 
 See `env.example` for the full list of environment variables (timeouts, concurrency caps, TTLs, feature flags). All are read by `app/config.py`.
 
+`FIRECRAWL_API_KEY` is the one that changes the shape of the pipeline: leave it empty and Stage 5 is omitted entirely, so the chain is the four local stages and nothing ever leaves the host.
+
 ## Development
 
 ```bash
 python -m venv .venv
 .venv/bin/pip install -e ".[api,worker,dev]"       # .venv/Scripts/pip on Windows
-.venv/bin/python -m camoufox fetch                 # Stage 2's Firefox build (~200MB)
+.venv/bin/python -m camoufox fetch                 # Stage 3's Firefox build (~200MB)
+.venv/bin/python -m playwright install chromium    # Stage 2's browser
 .venv/bin/python -m playwright install firefox     # only for the consent-dismissal tests
 .venv/bin/python -m pytest
 ```
@@ -185,11 +210,15 @@ detected — so run them before trusting a change to any stage:
 
 They check both browser stages against `bot.sannysoft.com` and
 `browserscan.net/bot-detection`, assert Stage 1 still defeats the TLS-layer
-blocks on `hp.com`/`acer.com`, and drive Stage 3 through a real Cloudflare
-Turnstile. Stage 3 falls back to plain headless on macOS/Windows (Xvfb is
-Linux-only), so a local pass is the weaker configuration for that stage.
-Stage 2 is headless everywhere on purpose — see `STAGE2_USE_XVFB` in
-`env.example` for the measurement behind that.
+blocks on `hp.com`/`acer.com`, drive Stage 4 through a real Cloudflare
+Turnstile, and check that Stage 2 gets the real reddit.com page rather than
+its interstitial shell. Stage 4 falls back to plain headless on
+macOS/Windows (Xvfb is Linux-only), so a local pass is the weaker
+configuration for that stage. Stage 3 is headless everywhere on purpose —
+see `STAGE3_USE_XVFB` in `env.example` for the measurement behind that.
+Stage 2 is deliberately excluded from the fingerprint probes; its stealth is
+JS-injected and sannysoft can see the overrides, which is why Stage 3
+exists.
 
 Running the API and worker outside Docker needs a local Redis plus `AUTH_TOKEN`/`REDIS_URL` set (see `env.example`):
 
@@ -203,13 +232,13 @@ AUTH_TOKEN=dev-token REDIS_URL=redis://localhost:6379/0 .venv/Scripts/python -m 
 - `app/` — FastAPI web tier (job submission/status plus the `/mcp` endpoint; never imports a stage or a browser library)
 - `worker/` — arq worker that actually executes the fallback pipeline
 - `pipeline/` — the fetch stages, robots gate, browser concurrency slots, consent dismissal, domain memory
-- `extract/` — canonical HTML → raw_html/markdown/llm_text formatting plus ld+json product parsing, decoupled from which stage won
+- `extract/` — the one HTML → Markdown converter (crawl4ai), the raw_html/llm_text formats built from it, plus ld+json product parsing; decoupled from which stage won
 - `common/` — logging, error types, per-domain rate limiting
 - `docker/` — separate Dockerfiles for the light `api` image and the browser-heavy `worker` image
 
 ## Known limitations / next steps
 
-- **IP reputation is the ceiling, and there is no proxy support.** Dell and Lenovo run Akamai Bot Manager (`_abck`/`bm_sz` cookies), which scores the source IP independently of how good a fingerprint is. All traffic leaves one datacenter IP, so sustained volume will eventually be rate-limited or challenged no matter how well stages 1-3 impersonate a browser. `PER_DOMAIN_MAX_CONCURRENCY` and the domain memory are the available mitigations; residential proxies would be the actual fix, and both Camoufox and SeleniumBase accept a `proxy=` argument if that decision is revisited.
-- **Stage 3 cannot always report an HTTP status.** SeleniumBase's CDP surface returns HTML without one, so the stage reconstructs it from `Network.responseReceived` events and falls back to `200` when no top-level document response was observed. When that happens, block detection rests on the text/marker heuristics alone.
+- **IP reputation is the ceiling, and there is no proxy support.** Dell and Lenovo run Akamai Bot Manager (`_abck`/`bm_sz` cookies), which scores the source IP independently of how good a fingerprint is. All traffic leaves one datacenter IP, so sustained volume will eventually be rate-limited or challenged no matter how well stages 1-4 impersonate a browser. `PER_DOMAIN_MAX_CONCURRENCY` and the domain memory are the available mitigations; residential proxies would be the actual fix, and both Camoufox and SeleniumBase accept a `proxy=` argument if that decision is revisited.
+- **Stage 4 cannot always report an HTTP status.** SeleniumBase's CDP surface returns HTML without one, so the stage reconstructs it from `Network.responseReceived` events and falls back to `200` when no top-level document response was observed. When that happens, block detection rests on the text/marker heuristics alone.
 - **`Product` ld+json is common on detail pages, rare on listing pages.** Of the vendor pages checked, only Lenovo's product pages carried it; Dell, HP and Acer listing pages ship only `BreadcrumbList`/`Corporation`. The table appears when the data is there and is silently omitted otherwise.
 - **Cookie/popup dismissal is heuristic-based** (known CMP selectors + multilingual text matching + generic overlay hiding in `pipeline/consent/dismiss.py`), not a vendored copy of a maintained consent-rules library. It degrades gracefully but won't catch every CMP design.

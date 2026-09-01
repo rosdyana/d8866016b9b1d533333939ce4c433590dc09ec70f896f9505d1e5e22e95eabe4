@@ -12,7 +12,7 @@ async def _warm(api, *, formats=("llm_text",), robotstxt=True, text="cached text
         url="https://example.com/",
         formats=list(formats),
         robotstxt=robotstxt,
-        stage_won="stage2_camoufox",
+        stage_won="stage3_camoufox",
         job_id="earlier-job",
         result=ExtractionOutput(llm_text=text),
     )
@@ -40,7 +40,7 @@ async def test_a_warm_key_serves_the_result_without_enqueuing(api):
     assert body["status"] == "success"
     assert body["cached"] is True
     assert body["cache_key"] == key
-    assert body["stage_won"] == "stage2_camoufox"
+    assert body["stage_won"] == "stage3_camoufox"
     assert body["result"]["llm_text"] == "the page text"
     assert api.pool.calls == []
 
