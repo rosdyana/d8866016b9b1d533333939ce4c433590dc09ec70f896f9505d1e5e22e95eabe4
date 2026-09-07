@@ -12,6 +12,7 @@ from camoufox.async_api import AsyncCamoufox
 from playwright.async_api import Error as PlaywrightError
 
 from common.errors import UnsupportedContentType
+from pipeline.browser.lazyload import has_unresolved_lazy_content, scroll_full_page
 from pipeline.browser.settle import settle_until_stable
 from pipeline.browser.slots import BrowserSlots
 from pipeline.consent.dismiss import attach_dialog_autodismiss, dismiss_consent_and_overlays
@@ -22,6 +23,10 @@ from pipeline.stages.content_type import guard_html_content_type
 # Share of the stage budget spent letting a client-rendered page fill in
 # after consent dismissal. The rest is reserved for launch and navigation.
 _SETTLE_BUDGET_RATIO = 0.4
+
+# Share of the stage budget spent triggering below-the-fold lazyload
+# fragments (see pipeline/browser/lazyload.py) before settling.
+_SCROLL_BUDGET_RATIO = 0.1
 
 
 class Stage3Camoufox(Stage):
@@ -70,16 +75,24 @@ class Stage3Camoufox(Stage):
                     guard_html_content_type(response.headers.get("content-type"))
 
                 await dismiss_consent_and_overlays(page)
+                await scroll_full_page(page, self.timeout_seconds * _SCROLL_BUDGET_RATIO)
 
                 status_code = response.status if response is not None else 200
                 # Akamai's interstitial is a static document while its
                 # sensor runs, so settling on size alone hands back the
                 # challenge page. Gate the early return on the same verdict
-                # the orchestrator will apply to this result anyway.
+                # the orchestrator will apply to this result anyway - and on
+                # scroll-triggered lazyload fragments (see
+                # pipeline/browser/lazyload.py) actually having resolved,
+                # since a page with good above-the-fold content already
+                # passes is_good_enough long before those fragments land.
                 html = await settle_until_stable(
                     page.content,
                     self.timeout_seconds * _SETTLE_BUDGET_RATIO,
-                    is_settled=lambda candidate: is_good_enough(status_code, candidate).passed,
+                    is_settled=lambda candidate: (
+                        is_good_enough(status_code, candidate).passed
+                        and not has_unresolved_lazy_content(candidate)
+                    ),
                 )
                 final_url = page.url
 
