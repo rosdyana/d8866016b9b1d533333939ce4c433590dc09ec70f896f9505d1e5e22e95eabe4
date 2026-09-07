@@ -19,12 +19,30 @@ import asyncio
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 
+from pipeline.browser.lazyload import has_unresolved_lazy_content
 from pipeline.browser.slots import BrowserSlots
 from pipeline.stages.base import FetchResult, Stage
 from pipeline.stages.content_type import guard_html_content_type
 
 _user_agent: str | None = None
 _user_agent_lock = asyncio.Lock()
+
+# Share of the stage budget crawl4ai's own `wait_for` may spend polling for
+# lazyload fragments (see pipeline/browser/lazyload.py) to resolve after
+# `scan_full_page` has scrolled. A JS-mode `wait_for` never raises on its
+# own timeout - it just gives up quietly (`crawl4ai/async_crawler_strategy.py`
+# `csp_compliant_wait` returns `False`, and the caller discards that return
+# value) - so this bounds how long that quiet wait can run, not whether it
+# can fail the stage.
+_LAZYLOAD_WAIT_TIMEOUT_RATIO = 0.2
+
+# `comp_lazyload` placeholders are literally empty until their fragment
+# lands - matches `pipeline/browser/lazyload.py::has_unresolved_lazy_content`'s
+# emptiness anchor, expressed in-page since this runs inside the browser.
+_LAZYLOAD_RESOLVED_JS = (
+    "() => !Array.from(document.querySelectorAll('.comp_lazyload'))"
+    ".some(el => el.innerHTML.trim() === '')"
+)
 
 
 async def _coherent_user_agent() -> str:
@@ -123,6 +141,21 @@ class Stage2Crawl4ai(Stage):
             # production caller.
             remove_overlay_elements=True,
             remove_consent_popups=True,
+            # Lenovo PDPs defer several sections behind IntersectionObserver
+            # -gated `comp_lazyload` placeholders (see
+            # pipeline/browser/lazyload.py) that never fire without a
+            # scroll. `max_scroll_steps` is bumped from crawl4ai's default
+            # of 10: at its default 600px viewport that only reaches
+            # ~6,600px, short of a full Lenovo PDP's height. `scroll_delay`
+            # matches Stage 3's own per-step pause.
+            scan_full_page=True,
+            scroll_delay=0.3,
+            max_scroll_steps=30,
+            # Best-effort extra wait for a fragment's fetch to land after
+            # scan_full_page's scroll - see _LAZYLOAD_WAIT_TIMEOUT_RATIO for
+            # why this alone cannot be trusted to force escalation.
+            wait_for=f"js:{_LAZYLOAD_RESOLVED_JS}",
+            wait_for_timeout=int(self.timeout_seconds * 1000 * _LAZYLOAD_WAIT_TIMEOUT_RATIO),
             verbose=False,
         )
 
@@ -139,6 +172,15 @@ class Stage2Crawl4ai(Stage):
             raise RuntimeError(result.error_message or "crawl4ai reported failure")
 
         guard_html_content_type(_content_type(result.response_headers))
+
+        if has_unresolved_lazy_content(result.html):
+            # scan_full_page scrolled and wait_for gave the fragment fetch
+            # extra time, but wait_for's JS mode gives up quietly rather
+            # than raising (see _LAZYLOAD_WAIT_TIMEOUT_RATIO above) - so
+            # this is the only thing that actually forces escalation.
+            # Stage 3 has the same check wired into a real poll loop
+            # (`settle_until_stable`), which is what resolves it.
+            raise RuntimeError("unresolved lazyload content")
 
         # No settle loop here, unlike Stages 3 and 4. `settle_until_stable`
         # needs a repeatable `async () -> str`, and `arun()` is one-shot. A

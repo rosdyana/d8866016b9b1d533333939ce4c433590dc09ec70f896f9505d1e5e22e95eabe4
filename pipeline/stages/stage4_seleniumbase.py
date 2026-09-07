@@ -15,6 +15,7 @@ from contextlib import suppress
 import mycdp
 from seleniumbase import cdp_driver
 
+from pipeline.browser.lazyload import has_unresolved_lazy_content, scroll_full_page
 from pipeline.browser.settle import settle_until_stable
 from pipeline.browser.slots import BrowserSlots
 from pipeline.quality import is_good_enough
@@ -24,6 +25,10 @@ from pipeline.stages.content_type import guard_html_content_type
 # Share of the stage budget spent letting a client-rendered page fill in.
 # The rest is reserved for launch, navigation and captcha solving.
 _SETTLE_BUDGET_RATIO = 0.4
+
+# Share of the stage budget spent triggering below-the-fold lazyload
+# fragments (see pipeline/browser/lazyload.py) before settling.
+_SCROLL_BUDGET_RATIO = 0.1
 
 
 class _DocumentResponses:
@@ -91,6 +96,8 @@ class Stage4SeleniumBase(Stage):
                     # and a solver failure must not lose the HTML we have.
                     await page.solve_captcha()
 
+                await scroll_full_page(page, self.timeout_seconds * _SCROLL_BUDGET_RATIO)
+
                 html = await settle_until_stable(
                     page.get_content,
                     self.timeout_seconds * _SETTLE_BUDGET_RATIO,
@@ -98,8 +105,14 @@ class Stage4SeleniumBase(Stage):
                     # while it works, so a stable size is not "done". The
                     # status is only resolvable after settling here, so the
                     # predicate asks the content question alone - the real
-                    # status check is the orchestrator's, on the result below.
-                    is_settled=lambda candidate: is_good_enough(200, candidate).passed,
+                    # status check is the orchestrator's, on the result
+                    # below. Also gated on scroll-triggered lazyload
+                    # fragments (see pipeline/browser/lazyload.py) actually
+                    # having resolved, for the same reason as Stage 3.
+                    is_settled=lambda candidate: (
+                        is_good_enough(200, candidate).passed
+                        and not has_unresolved_lazy_content(candidate)
+                    ),
                 )
                 final_url = await page.evaluate("window.location.href") or url
 
