@@ -90,6 +90,15 @@ POST /jobs
 
 `formats` defaults to `["markdown"]` if omitted — `raw_html` is routinely megabytes and most callers feed the result to a model. Ask for `raw_html`/`llm_text` explicitly when you want them. Add `"robotstxt": false` to skip the robots.txt permission check for that request — off by default; robots.txt is respected unless a caller explicitly opts out.
 
+Add `"force_stage": "stage5_firecrawl"` to skip the normal escalation chain and run exactly that
+stage — useful to spend Firecrawl's per-call cost deliberately instead of only as a last resort.
+Valid names are `stage1_curl_cffi`, `stage2_crawl4ai`, `stage3_camoufox`, `stage4_seleniumbase`,
+`stage5_firecrawl` (the last only works if `FIRECRAWL_API_KEY` is configured); an unknown or
+unconfigured name fails the job with `status: "error"` rather than rejecting the request. A
+forced stage bypasses the response cache below in both directions — it never returns a result
+another stage produced, and its own result is never cached — and never updates which stage gets
+tried first for this host next time.
+
 Returns `202 Accepted` with a job object (`id`, `status: "queued"`).
 
 **Poll for the result**
@@ -151,7 +160,7 @@ Two tools:
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `scrape` | `url`, `formats` (default `["llm_text"]`), `robotstxt` (default `true`), `refresh` (default `false`), `wait_seconds` (default `45`, 5-300) | `status`, `stage_won`, and the requested format fields |
+| `scrape` | `url`, `formats` (default `["llm_text"]`), `robotstxt` (default `true`), `refresh` (default `false`), `force_stage` (default `null`), `wait_seconds` (default `45`, 5-300) | `status`, `stage_won`, and the requested format fields |
 | `get_scrape_result` | `job_id`, `wait_seconds` | the same shape |
 
 `formats` defaults to `llm_text` here, where the REST API defaults to `markdown`: a tool result goes straight into a model's context, and `raw_html` is routinely megabytes,
@@ -161,6 +170,9 @@ and a tool result goes straight into a model's context.
 30 days comes back instantly; `refresh: true` bypasses that and fetches again. The cache
 management endpoints are deliberately not exposed as tools — a model shouldn't be clearing the
 service's cache.
+
+`force_stage` skips the escalation chain and runs exactly one stage — see the REST API section
+above for the valid names and the cache/domain-memory bypass that comes with it.
 
 `scrape` submits the same job the REST API does and waits for it, reporting MCP progress
 notifications while it does. A page that resolves at Stage 1 comes back in well under a second;

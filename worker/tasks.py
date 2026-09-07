@@ -95,7 +95,12 @@ def _build_stages(ctx: dict, settings) -> list:
 
 
 async def run_scrape_job(
-    ctx: dict, job_id: str, url: str, formats: list[str], robotstxt: bool = True
+    ctx: dict,
+    job_id: str,
+    url: str,
+    formats: list[str],
+    robotstxt: bool = True,
+    force_stage: str | None = None,
 ) -> None:
     settings = ctx["settings"]
     store = JobStore(ctx["redis"], settings.job_result_ttl_seconds)
@@ -112,9 +117,28 @@ async def run_scrape_job(
             logger.warning("robots_txt_bypassed")
 
         stages = _build_stages(ctx, settings)
-        domain_memory = ctx["domain_memory"] if settings.domain_memory_enabled else None
+        # A forced stage must not read the domain's remembered stage, and
+        # (below) its result must not overwrite that memory or the response
+        # cache either - a single debug request would otherwise silently
+        # bias every future normal request for this host toward whatever
+        # stage was forced, Firecrawl's per-call cost included.
+        domain_memory = (
+            ctx["domain_memory"]
+            if settings.domain_memory_enabled and force_stage is None
+            else None
+        )
 
         try:
+            if force_stage is not None:
+                available = {stage.name: stage for stage in stages}
+                if force_stage not in available:
+                    raise ValueError(
+                        f"unknown or unavailable stage {force_stage!r}; "
+                        f"available stages: {sorted(available)}"
+                    )
+                stages = [available[force_stage]]
+                logger.info("job_stage_forced", force_stage=force_stage)
+
             async with ctx["rate_limiter"].slot(host):
                 result = await asyncio.wait_for(
                     run_pipeline(
@@ -164,8 +188,11 @@ async def run_scrape_job(
         await store.update(job_id, status="success", stage_won=result.stage_won, result=output)
 
         # After the job is marked done, and only for a success: a transient
-        # block or timeout cached for 30 days would poison the URL for a month.
-        if settings.scrape_cache_enabled:
+        # block or timeout cached for 30 days would poison the URL for a
+        # month. Also skipped for a forced stage, same reasoning as the
+        # domain-memory bypass above - a one-off forced result must not
+        # become the answer every future unforced request gets served.
+        if settings.scrape_cache_enabled and force_stage is None:
             await _store_in_cache(
                 ctx,
                 settings,

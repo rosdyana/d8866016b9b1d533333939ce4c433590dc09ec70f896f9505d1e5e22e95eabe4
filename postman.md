@@ -75,6 +75,7 @@ Content-Type: application/json
 - `formats` — optional, defaults to `["markdown"]` if omitted: `raw_html` is routinely megabytes and most callers feed the result to a model. Any subset of `raw_html`/`markdown`/`llm_text` is valid, e.g. `["raw_html", "markdown", "llm_text"]` for all three.
 - `robotstxt` — optional, defaults to `true`. Set to `false` to skip the robots.txt permission check entirely for this request (an explicit per-call opt-out for trusted/authenticated callers — use deliberately, not as a default).
 - `refresh` — optional, defaults to `false`. Set to `true` to skip the 30-day response cache and fetch again. The fresh result replaces the cached one on success.
+- `force_stage` — optional, defaults to unset. Skip the escalation chain and run exactly this stage, e.g. `"stage5_firecrawl"` to spend its per-call cost deliberately. Valid names: `stage1_curl_cffi`, `stage2_crawl4ai`, `stage3_camoufox`, `stage4_seleniumbase`, `stage5_firecrawl` (needs `FIRECRAWL_API_KEY` configured). Bypasses the response cache both ways and never changes which stage gets tried first for this host afterward; an unknown/unconfigured name fails the job with `status: "error"`.
 
 **Response `202 Accepted`**
 ```json

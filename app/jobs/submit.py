@@ -27,11 +27,16 @@ async def submit_scrape(
     formats: list[OutputFormat],
     robotstxt: bool,
     refresh: bool = False,
+    force_stage: str | None = None,
 ) -> Job:
     key = cache_key(url, formats, robotstxt)
     store = JobStore(redis, settings.job_result_ttl_seconds)
 
-    if settings.scrape_cache_enabled and not refresh:
+    # A forced stage is a deliberate override of the normal chain - serving
+    # a cache entry some other stage produced would defeat the point of
+    # asking for this one specifically. The worker (see run_scrape_job)
+    # likewise skips writing this job's result back to the same key.
+    if settings.scrape_cache_enabled and not refresh and force_stage is None:
         cache = ScrapeCache(redis, settings.scrape_cache_ttl_seconds)
         entry = await cache.get(key)
         if entry is not None:
@@ -57,13 +62,17 @@ async def submit_scrape(
         url=url,
         formats=formats,
         robotstxt=robotstxt,
+        force_stage=force_stage,
         cache_key=key,
     )
     await store.create(job)
     # `refresh` deliberately does not travel to the worker: it only suppresses
     # the read above. The worker overwrites the entry on success either way,
     # and pre-deleting would throw away a usable result if the refetch fails.
+    # `force_stage` does travel - the worker needs it to pick the one stage
+    # to run, and it is the only field here that changes what happens on the
+    # other side of the queue.
     await arq_pool.enqueue_job(
-        "run_scrape_job", job.id, job.url, job.formats, job.robotstxt
+        "run_scrape_job", job.id, job.url, job.formats, job.robotstxt, force_stage
     )
     return job

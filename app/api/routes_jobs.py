@@ -29,6 +29,7 @@ async def create_job(
         formats=payload.formats,
         robotstxt=payload.robotstxt,
         refresh=payload.refresh,
+        force_stage=payload.force_stage,
     )
 
 

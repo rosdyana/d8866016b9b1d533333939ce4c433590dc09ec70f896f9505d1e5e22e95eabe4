@@ -112,6 +112,21 @@ def build_mcp_server(state: State) -> MCPServer:
             float,
             Field(ge=5, le=300, description="How long to wait for the content before handing back a job_id."),
         ] = 45.0,
+        force_stage: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Skip the normal escalation chain and run exactly this stage, e.g. "
+                    "'stage5_firecrawl' to spend its per-call cost deliberately instead of "
+                    "only as a last resort. Valid names: stage1_curl_cffi, stage2_crawl4ai, "
+                    "stage3_camoufox, stage4_seleniumbase, stage5_firecrawl (the last only "
+                    "when the server has a Firecrawl key configured). Bypasses the response "
+                    "cache in both directions, so this never serves a cached result from a "
+                    "different stage and its own result is never cached either. An unknown "
+                    "or unconfigured name comes back as status='error', not a tool error."
+                )
+            ),
+        ] = None,
     ) -> ScrapeResult:
         """Fetch a web page and return its content.
 
@@ -128,7 +143,8 @@ def build_mcp_server(state: State) -> MCPServer:
         budget expired - call get_scrape_result with the returned job_id.
 
         A page fetched recently comes back from cache immediately; pass
-        refresh=true to bypass that and fetch again.
+        refresh=true to bypass that and fetch again. Pass force_stage to
+        skip the escalation chain and use exactly one stage instead.
         """
         settings = get_settings()
         job = await submit_scrape(
@@ -139,6 +155,7 @@ def build_mcp_server(state: State) -> MCPServer:
             formats=formats,
             robotstxt=robotstxt,
             refresh=refresh,
+            force_stage=force_stage,
         )
 
         store = JobStore(state.redis, settings.job_result_ttl_seconds)

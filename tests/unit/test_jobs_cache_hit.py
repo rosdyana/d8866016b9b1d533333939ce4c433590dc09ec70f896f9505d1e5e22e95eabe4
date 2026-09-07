@@ -98,8 +98,23 @@ async def test_a_robotstxt_bypass_is_not_served_from_a_respecting_entry(api):
     assert len(api.pool.calls) == 1
 
 
+async def test_a_forced_stage_is_not_served_from_a_warm_entry(api):
+    """A forced stage must not return a result some other stage produced."""
+    await _warm(api, text="the page text")
+
+    response = await api.client.post(
+        "/jobs", json={**_BODY, "force_stage": "stage5_firecrawl"}
+    )
+
+    body = response.json()
+    assert body["status"] == "queued"
+    assert body["cached"] is False
+    assert len(api.pool.calls) == 1
+    assert api.pool.calls[0][5] == "stage5_firecrawl"
+
+
 async def test_the_enqueued_arg_list_is_unchanged(api):
-    """`refresh` deliberately does not travel to the worker."""
+    """`refresh` deliberately does not travel to the worker; `force_stage` does."""
     await api.client.post("/jobs", json={**_BODY, "refresh": True})
 
     call = api.pool.calls[0]
@@ -107,7 +122,8 @@ async def test_the_enqueued_arg_list_is_unchanged(api):
     assert call[2] == "https://example.com/"
     assert call[3] == ["llm_text"]
     assert call[4] is True
-    assert len(call) == 5
+    assert call[5] is None
+    assert len(call) == 6
 
 
 async def test_url_normalisation_makes_a_bare_host_the_same_entry(api):
