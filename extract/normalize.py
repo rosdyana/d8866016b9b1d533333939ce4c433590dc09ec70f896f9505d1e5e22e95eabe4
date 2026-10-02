@@ -15,6 +15,9 @@ caller asking for those gets the same shape from every stage.
 
 from __future__ import annotations
 
+import html as html_module
+import re
+
 from extract.html_cleaner import clean_html
 from extract.llm_text import to_llm_text
 from extract.markdown import to_markdown
@@ -25,6 +28,31 @@ from extract.structured import extract_products, products_to_markdown
 # up in a model's context; a caller that genuinely wants the HTML asks for
 # it. The full set still lives in `app/jobs/models.ALL_FORMATS`.
 DEFAULT_FORMATS = ("markdown",)
+
+
+# og:title before <title>: <title> usually carries a " | Site Name" suffix,
+# and og:title is what the page offers as its own name when shared. Attribute
+# order varies across sites, so both orders are matched.
+_OG_TITLE_RES = (
+    re.compile(
+        r"<meta[^>]+property=[\"']og:title[\"'][^>]*content=[\"']([^\"']*)[\"']", re.IGNORECASE
+    ),
+    re.compile(
+        r"<meta[^>]+content=[\"']([^\"']*)[\"'][^>]*property=[\"']og:title[\"']", re.IGNORECASE
+    ),
+)
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def extract_title(html: str) -> str | None:
+    for pattern in (*_OG_TITLE_RES, _TITLE_RE):
+        match = pattern.search(html or "")
+        if match:
+            title = _WHITESPACE_RE.sub(" ", html_module.unescape(match.group(1))).strip()
+            if title:
+                return title
+    return None
 
 
 def _prepend(table: str, body: str | None) -> str | None:
@@ -45,7 +73,7 @@ def build_from_html(
     produced (Stage 5 / Firecrawl) and is used instead of converting the
     HTML ourselves.
     """
-    output = ExtractionOutput()
+    output = ExtractionOutput(title=extract_title(html))
     needs_text = "markdown" in formats or "llm_text" in formats
     product_table = products_to_markdown(extract_products(html)) if needs_text else ""
 

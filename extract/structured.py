@@ -117,6 +117,12 @@ def extract_products(html: str) -> list[dict[str, str]]:
                 "currency": str(offer.get("priceCurrency") or "").strip(),
                 "availability": _shorten(offer.get("availability")),
             }
+            if not (row["sku"] or row["price"] or row["availability"]):
+                # A review or article names the product it covers with a
+                # bare Product node (stuff.co.za, 2026-10-02). A row with
+                # nothing but that name repeats what the page already says
+                # and puts a "## Products" heading above the article.
+                continue
             key = (row["name"], row["sku"])
             if key in seen:
                 continue

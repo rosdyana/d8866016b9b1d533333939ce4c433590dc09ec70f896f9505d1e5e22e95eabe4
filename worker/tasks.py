@@ -9,6 +9,7 @@ from app.jobs.cache import cache_key
 from app.jobs.store import JobStore
 from common.errors import AllStagesFailed, RobotsDisallowed, UnsupportedContentType
 from common.logging import get_logger
+from extract.models import ExtractionOutput
 from extract.normalize import build_from_html
 from pipeline.orchestrator import run_pipeline
 from pipeline.stages.stage1_curl_cffi import Stage1CurlCffi
@@ -180,9 +181,12 @@ async def run_scrape_job(
         # pruner), synchronously, and a catalogue page is megabytes. Left
         # inline it stalls every other job on this worker - and it runs even
         # when Stage 1 won in 0.2s.
-        output = await asyncio.to_thread(
-            build_from_html, result.html, result.final_url, tuple(formats), result.markdown
-        )
+        if result.feed is not None:
+            output = ExtractionOutput(feed=result.feed)
+        else:
+            output = await asyncio.to_thread(
+                build_from_html, result.html, result.final_url, tuple(formats), result.markdown
+            )
 
         logger.info("job_succeeded", stage_won=result.stage_won)
         await store.update(job_id, status="success", stage_won=result.stage_won, result=output)
@@ -191,8 +195,10 @@ async def run_scrape_job(
         # block or timeout cached for 30 days would poison the URL for a
         # month. Also skipped for a forced stage, same reasoning as the
         # domain-memory bypass above - a one-off forced result must not
-        # become the answer every future unforced request gets served.
-        if settings.scrape_cache_enabled and force_stage is None:
+        # become the answer every future unforced request gets served. And not
+        # for a feed: its whole point is the newest items, and a 30-day-old
+        # copy would quietly hide every post published since.
+        if settings.scrape_cache_enabled and force_stage is None and result.feed is None:
             await _store_in_cache(
                 ctx,
                 settings,

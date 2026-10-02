@@ -14,6 +14,10 @@ class FetchResult:
     # alone, which asks Firecrawl for main-content Markdown directly. None
     # everywhere else, meaning "convert the HTML the normal way".
     markdown: str | None = None
+    # The raw RSS/Atom document, set only by Stage 1 when the URL is a feed
+    # (`pipeline/stages/content_type.is_feed`). `html` is "" then: there is
+    # no page to quality-check or convert.
+    feed: str | None = None
 
 
 class Stage(ABC):

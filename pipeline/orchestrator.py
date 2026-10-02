@@ -26,6 +26,7 @@ class PipelineResult:
     html: str
     final_url: str
     markdown: str | None = None
+    feed: str | None = None
 
 
 def _ordered_from_memory(stages: list[Stage], last_successful: str | None) -> list[Stage]:
@@ -81,6 +82,21 @@ async def run_pipeline(
         except Exception as exc:  # noqa: BLE001 - any stage failure escalates, by design
             failures.append(f"{stage.name}:{exc.__class__.__name__}")
             continue
+
+        if result.feed is not None:
+            # is_good_enough judges rendered HTML and has nothing to say about
+            # XML. Not recorded in domain memory either: a host whose pages
+            # need a browser can still serve its feed to Stage 1, and
+            # remembering Stage 1 would undo what the memory learned for them.
+            if result.status_code >= 400:
+                failures.append(f"{stage.name}:error_status_{result.status_code}")
+                continue
+            return PipelineResult(
+                stage_won=stage.name,
+                html="",
+                final_url=result.final_url,
+                feed=result.feed,
+            )
 
         verdict = is_good_enough(result.status_code, result.html)
         if verdict.passed:

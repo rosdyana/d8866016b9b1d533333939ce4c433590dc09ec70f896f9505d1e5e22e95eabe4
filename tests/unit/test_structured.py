@@ -86,3 +86,11 @@ def test_pipe_in_name_does_not_break_the_table():
 
 def test_no_products_yields_no_table():
     assert products_to_markdown([]) == ""
+
+
+def test_a_name_only_product_is_not_a_row():
+    # Shape of a review page's ld+json (stuff.co.za, 2026-10-02): the Product
+    # node exists only to name what the article reviews.
+    review = {"@type": "Product", "name": "Asus ExpertBook Ultra (B9406CAA)", "brand": "Asus"}
+    assert extract_products(_wrap(review)) == []
+    assert products_to_markdown(extract_products(_wrap(review))) == ""

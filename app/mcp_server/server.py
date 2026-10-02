@@ -38,9 +38,11 @@ def _to_result(job: Job) -> ScrapeResult:
         url=job.url,
         status=job.status,
         stage_won=job.stage_won,
+        title=output.title if output else None,
         llm_text=output.llm_text if output else None,
         markdown=output.markdown if output else None,
         raw_html=output.raw_html if output else None,
+        feed=output.feed if output else None,
         error=job.error,
     )
 
@@ -141,6 +143,8 @@ def build_mcp_server(state: State) -> MCPServer:
         unsupported_content_type (the URL is a PDF or image, not a page -
         do not retry); timeout; error; or queued/running, meaning the wait
         budget expired - call get_scrape_result with the returned job_id.
+        An RSS/Atom feed URL succeeds with its raw XML in `feed` and the
+        text formats empty; feeds are never served from cache.
 
         A page fetched recently comes back from cache immediately; pass
         refresh=true to bypass that and fetch again. Pass force_stage to

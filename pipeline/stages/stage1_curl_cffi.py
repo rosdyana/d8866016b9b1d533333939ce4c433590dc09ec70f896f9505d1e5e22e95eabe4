@@ -14,7 +14,7 @@ from __future__ import annotations
 from curl_cffi import AsyncSession
 
 from pipeline.stages.base import FetchResult, Stage
-from pipeline.stages.content_type import guard_html_content_type
+from pipeline.stages.content_type import guard_html_content_type, is_feed
 
 
 class Stage1CurlCffi(Stage):
@@ -42,7 +42,15 @@ class Stage1CurlCffi(Stage):
             timeout=self.timeout_seconds,
         )
 
-        guard_html_content_type(response.headers.get("content-type"))
+        content_type = response.headers.get("content-type")
+        if is_feed(content_type, response.text):
+            return FetchResult(
+                html="",
+                status_code=response.status_code,
+                final_url=str(response.url),
+                feed=response.text,
+            )
+        guard_html_content_type(content_type)
 
         return FetchResult(
             html=response.text,
